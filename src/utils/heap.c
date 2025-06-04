@@ -1,10 +1,8 @@
 #include <assert.h>
 #include <string.h>
 #include <stdbool.h>
-#ifdef _WIN64
-#include <intrin.h>
-#endif
 #include "heap.h"
+#include "clz.h"
 
 #ifndef NDEBUG // Debug mode
 
@@ -307,42 +305,6 @@ void pomelo_heap_clear(pomelo_heap_t * heap) {
 /* -------------------------------------------------------------------------- */
 
 
-/// @brief Calculate the leading zeros mask
-static size_t calc_leading_zeros_mask(size_t value) {
-#ifdef _WIN64
-    unsigned long index = 0;
-    if (_BitScanReverse64(&index, value)) {
-        return 1ULL << index;
-    }
-    return 0;
-
-#elif defined(_WIN32)
-    unsigned long index = 0;
-    if (_BitScanReverse(&index, value)) {
-        return 1ULL << index;
-    }
-    return 0;
-
-#elif defined(__GNUC__) || defined(__clang__)
-    if (value == 0) {
-        return 0;
-    }
-    int shift = 63 - __builtin_clzll(value);
-    return shift < 0 ? 0 : (1ULL << shift);
-
-#else
-    size_t mask = 1;
-    while (mask <= value) {
-        if ((value & mask) == mask) {
-            return mask;
-        }
-        mask <<= 1;
-    }
-    return mask;
-#endif
-}
-
-
 pomelo_heap_node_t * pomelo_heap_find_insert_position(pomelo_heap_t * heap) {
     assert(heap != NULL);
     assert(heap->root != NULL);
@@ -354,7 +316,7 @@ pomelo_heap_node_t * pomelo_heap_find_insert_position(pomelo_heap_t * heap) {
     // Use binary representation of size+1 to find insert position
     // Skip first 1 bit since we know root exists
     size_t pos = heap->size + 1;
-    size_t mask = calc_leading_zeros_mask(pos);
+    uint64_t mask = pomelo_clz_64_mask(pos);
     mask >>= 1; // Move to the bit before most significant
 
     while (mask > 0) {
@@ -378,7 +340,7 @@ pomelo_heap_node_t * pomelo_heap_find_last_node(pomelo_heap_t * heap) {
     // Use binary representation of size to find last node
     pomelo_heap_node_t * current = heap->root;
     size_t pos = heap->size;
-    size_t mask = calc_leading_zeros_mask(pos);
+    uint64_t mask = pomelo_clz_64_mask(pos);
     mask >>= 1;
 
     while (mask > 0) {

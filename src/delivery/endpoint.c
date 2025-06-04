@@ -1,11 +1,13 @@
 #include <assert.h>
 #include <string.h>
 #include "utils/macro.h"
+#include "utils/clz.h"
 #include "endpoint.h"
 #include "bus.h"
 #include "parcel.h"
 #include "context.h"
 #include "sender.h"
+
 #define POMELO_DELIVERY_ENDPOINT_DEFAULT_BUSES_CAPACITY 16
 
 
@@ -160,6 +162,8 @@ int pomelo_delivery_endpoint_init(
     endpoint->sequencer = info->sequencer;
     endpoint->heartbeat = info->heartbeat;
     endpoint->flags = 0;
+    endpoint->out_reliable_capacity = POMELO_DEFAULT_RELIABLE_CAPACITY;
+    endpoint->in_reliable_capacity = POMELO_DEFAULT_RELIABLE_CAPACITY;
 
     // Initialize the stop task
     pomelo_sequencer_task_init(
@@ -321,6 +325,7 @@ void pomelo_delivery_endpoint_send_ping_ex(
      *  opcode: 3 bits
      *  sequence_bytes - 1: 1 bit
      *  time_sync: 1 bit
+     *  reliable_cap_exp: 3 bits
      *  sequence: 1 - 8 bytes
      */
 
@@ -331,6 +336,18 @@ void pomelo_delivery_endpoint_send_ping_ex(
     meta_byte |= (uint8_t) ((sequence_bytes - 1) << 4);
     meta_byte |= (uint8_t)
         ((endpoint->flags & POMELO_DELIVERY_ENDPOINT_FLAG_TIME_SYNC) << 3);
+
+    // Encode reliable capacity (3 bits: 0-7 mapping to 8,16,32,64,128,256,512,1024)
+    size_t capacity = endpoint->in_reliable_capacity;
+    assert(
+        capacity >= POMELO_MIN_RELIABLE_CAPACITY &&
+        capacity <= POMELO_MAX_RELIABLE_CAPACITY
+    );
+
+    // Calculate the exponent (3-10) and map to 0-7
+    size_t exp = 64 - pomelo_clz_64(capacity - 1);
+    size_t encoded = (exp < 3) ? 0 : ((exp > 10) ? 7 : (exp - 3));
+    meta_byte |= (uint8_t) encoded;
 
     // Write the meta byte
     int ret = pomelo_delivery_writer_write(&writer, &meta_byte, 1);
@@ -564,7 +581,19 @@ void pomelo_delivery_endpoint_recv_ping(
     pomelo_delivery_endpoint_send_pong(endpoint, sequence, time_sync);
 
     // Check ready
-    pomelo_delivery_endpoint_check_ready(endpoint);
+    if (!(endpoint->flags & POMELO_DELIVERY_ENDPOINT_FLAG_READY)) {
+        size_t encoded = meta_byte & 0x07;
+        // 2 ^ (3 + encoded)
+        endpoint->out_reliable_capacity = (1 << (encoded + 3));
+        
+        // Ensure the decoded capacity doesn't exceed the maximum
+        if (endpoint->out_reliable_capacity > POMELO_MAX_RELIABLE_CAPACITY) {
+            endpoint->out_reliable_capacity = POMELO_MAX_RELIABLE_CAPACITY;
+        }
+        
+        endpoint->flags |= POMELO_DELIVERY_ENDPOINT_FLAG_READY;
+        pomelo_sequencer_submit(endpoint->sequencer, &endpoint->ready_task);
+    }
 }
 
 
@@ -578,11 +607,7 @@ void pomelo_delivery_endpoint_recv_pong(
 
     // Extract the time sync flag
     bool time_sync = (meta_byte >> 3) & 0x01;
-    if (!time_sync) {
-        // Check ready
-        pomelo_delivery_endpoint_check_ready(endpoint);
-        return; // No time sync
-    }
+    if (!time_sync) return; // No time sync
 
     // Extract the sequence bytes
     size_t sequence_bytes = ((meta_byte >> 4) & 0x01) + 1;
@@ -645,9 +670,6 @@ void pomelo_delivery_endpoint_recv_pong(
             recv_time    // res_recv_time
         );
     }
-
-    // Check ready
-    pomelo_delivery_endpoint_check_ready(endpoint);
 }
 
 
@@ -655,17 +677,6 @@ void pomelo_delivery_endpoint_heartbeat(pomelo_delivery_endpoint_t * endpoint) {
     assert(endpoint != NULL);
     pomelo_sequencer_submit(endpoint->sequencer, &endpoint->heartbeat_task);
     // => pomelo_delivery_endpoint_send_ping()
-}
-
-
-void pomelo_delivery_endpoint_check_ready(
-    pomelo_delivery_endpoint_t * endpoint
-) {
-    assert(endpoint != NULL);
-    if (endpoint->flags & POMELO_DELIVERY_ENDPOINT_FLAG_READY) return;  
-    endpoint->flags |= POMELO_DELIVERY_ENDPOINT_FLAG_READY;
-
-    pomelo_sequencer_submit(endpoint->sequencer, &endpoint->ready_task);
 }
 
 

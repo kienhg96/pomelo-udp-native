@@ -521,19 +521,20 @@ void pomelo_delivery_bus_process_sending_deferred(pomelo_delivery_bus_t * bus) {
     assert(bus != NULL);
     pomelo_list_t * dispatchers = bus->pending_dispatchers;
 
+    // TODO: Implement sending reliable messages parallelly
     // Reliable sending command will block the bus
     while (
         !(bus->flags & POMELO_DELIVERY_BUS_FLAG_STOP)
         && !bus->incomplete_reliable_dispatcher
     ) {
-        pomelo_delivery_dispatcher_t * command = NULL;
-        if (pomelo_list_pop_front(dispatchers, &command) != 0) break;
+        pomelo_delivery_dispatcher_t * dispatcher = NULL;
+        if (pomelo_list_pop_front(dispatchers, &dispatcher) != 0) break;
 
-        if (command->mode == POMELO_DELIVERY_MODE_RELIABLE) {
-            bus->incomplete_reliable_dispatcher = command;
+        if (dispatcher->mode == POMELO_DELIVERY_MODE_RELIABLE) {
+            bus->incomplete_reliable_dispatcher = dispatcher;
         }
 
-        pomelo_delivery_dispatcher_submit(command);
+        pomelo_delivery_dispatcher_submit(dispatcher);
     }
 
     bus->flags &= ~POMELO_DELIVERY_BUS_FLAG_PROCESSING;

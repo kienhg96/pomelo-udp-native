@@ -12,6 +12,12 @@ extern "C" {
 #endif
 
 
+// Reliable capacity configuration (encoded in 3 bits)
+#define POMELO_MIN_RELIABLE_CAPACITY 8
+#define POMELO_MAX_RELIABLE_CAPACITY 1024
+#define POMELO_DEFAULT_RELIABLE_CAPACITY 8
+
+
 /**
  * System parcel meta byte layout:
  *    opcode: 3 bits
@@ -20,7 +26,7 @@ extern "C" {
  * Ping opcode-meta layout:
  *    sequence_bytes - 1: 1 bit
  *    time_sync: 1 bit
- *    <padding>: 3 bits
+ *    reliable_cap_exp: 3 bits
  * 
  * Ping content layout:
  *    sequence: 1 - 8 bytes
@@ -116,6 +122,17 @@ struct pomelo_delivery_endpoint_s {
 
     /// @brief The ready task
     pomelo_sequencer_task_t ready_task;
+
+    /// @brief Capacity of outgoing reliable message heap.
+    /// This is the maximum number of reliable messages can be sent parallelly.
+    /// By current specs, the maximum of this value is 128
+    size_t out_reliable_capacity;
+
+    /// @brief Capacity of incoming reliable message heap.
+    /// This is the maximum number of reliable messages can be received
+    /// parallelly.
+    /// By current specs, the maximum of this value is 128
+    size_t in_reliable_capacity;
 };
 
 
@@ -194,12 +211,6 @@ void pomelo_delivery_endpoint_recv_pong(
 
 /// @brief Process heartbeat
 void pomelo_delivery_endpoint_heartbeat(pomelo_delivery_endpoint_t * endpoint);
-
-
-/// @brief Check ready
-void pomelo_delivery_endpoint_check_ready(
-    pomelo_delivery_endpoint_t * endpoint
-);
 
 
 /// @brief The deferred stop function

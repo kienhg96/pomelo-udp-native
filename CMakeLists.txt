@@ -219,6 +219,8 @@ set(SRC_UTILS
     src/utils/array.h
     src/utils/atomic.c
     src/utils/atomic.h
+    src/utils/clz.c
+    src/utils/clz.h
     src/utils/heap.c
     src/utils/heap.h
     src/utils/list.c
