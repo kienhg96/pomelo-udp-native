@@ -205,7 +205,7 @@ int pomelo_session_builtin_init(
 void pomelo_session_builtin_cleanup(pomelo_session_builtin_t * session) {
     assert(session != NULL);
     pomelo_session_t * base = &session->base;
-    pomelo_context_t * context = base->socket->context;
+    pomelo_context_t * context = base->context;
     pomelo_pool_t * channel_pool = context->builtin_channel_pool;
 
     // Release all channels

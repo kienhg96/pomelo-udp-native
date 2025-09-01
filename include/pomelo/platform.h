@@ -19,22 +19,31 @@ extern "C" {
 /// that will run on the main platform thread.
 typedef struct pomelo_platform_s pomelo_platform_t;
 
-/// @brief The task
-typedef struct pomelo_platform_task_s pomelo_platform_task_t;
-
 /// @brief The threadsafe executor interface
 ///
 /// This interface is used to submit tasks to the platform thread.
 /// It is threadsafe and can be called from any thread.
 /// 
 /// The tasks will be executed in the platform thread.
-typedef struct pomelo_threadsafe_executor_s pomelo_threadsafe_executor_t;
+typedef struct pomelo_platform_uv_executor_s pomelo_platform_executor_t;
+
+/// @brief Handle for executor, timer, udp and tasks
+typedef struct pomelo_platform_handle_s pomelo_platform_handle_t;
 
 /// @brief The entry point of task
 typedef void (*pomelo_platform_task_entry)(void * data);
 
-/// @brief The shutdown callback
-typedef void (*pomelo_platform_shutdown_callback)(pomelo_platform_t * platform);
+/// @brief The callback function of platform
+typedef void (*pomelo_platform_callback)(pomelo_platform_t * platform);
+
+
+struct pomelo_platform_handle_s {
+    /// @brief The handle type
+    int type;
+
+    /// @brief The handle data
+    void * data;
+};
 
 
 /* -------------------------------------------------------------------------- */
@@ -50,15 +59,12 @@ void pomelo_platform_set_extra(pomelo_platform_t * platform, void * data);
 void * pomelo_platform_get_extra(pomelo_platform_t * platform);
 
 
-/// @brief Startup the platform
-void pomelo_platform_startup(pomelo_platform_t * platform);
-
-
-/// @brief Shutdown the platform. The callback will be called when the platform
-/// is completely shutdown.
-void pomelo_platform_shutdown(
+/// @brief Close the platform.
+/// All resources will be closed, then the callback will be called.
+/// @return 0 if close task is submitted or -1 if platform is still closing.
+int pomelo_platform_close(
     pomelo_platform_t * platform,
-    pomelo_platform_shutdown_callback callback
+    pomelo_platform_callback callback
 );
 
 
@@ -78,24 +84,36 @@ uint64_t pomelo_platform_now(pomelo_platform_t * platform);
 /*                           Threadsafe executor APIs                         */
 /* -------------------------------------------------------------------------- */
 
-/// @brief Acquire a threadsafe executor (Non-threadsafe).
-/// When platform is shutdown, the threadsafe executor will be released.
-pomelo_threadsafe_executor_t * pomelo_platform_acquire_threadsafe_executor(
-    pomelo_platform_t * platform
+/// @brief Acquire an executor (Non-threadsafe).
+/// @param platform The platform
+/// @param executor_handle The handle of executor
+/// @return 0 if acquire task is submitted or -1 if failed
+int pomelo_platform_acquire_executor(
+    pomelo_platform_t * platform,
+    pomelo_platform_handle_t * executor_handle
 );
 
 
-/// @brief Release the threadsafe executor (Threadsafe).
-void pomelo_platform_release_threadsafe_executor(
+/// @brief Release the executor (Threadsafe).
+/// @param platform The platform
+/// @param executor_handle The handle of executor
+void pomelo_platform_release_executor(
     pomelo_platform_t * platform,
-    pomelo_threadsafe_executor_t * executor
+    pomelo_platform_handle_t * executor_handle
 );
 
 
-/// @brief Submit a task to run in platform thread (Threadsafe)
-pomelo_platform_task_t * pomelo_threadsafe_executor_submit(
+/// @brief Submit a task to run in platform thread (Threadsafe).
+/// If the platform is closing, the pending tasks will not be executed.
+/// In this case, the resources need to be cleaned up mannually.
+/// @param platform The platform
+/// @param executor_handle The handle of executor
+/// @param entry The entry point of task
+/// @param data The data to pass to the entry point
+/// @return 0 if task is submitted or -1 if failed
+int pomelo_platform_executor_submit(
     pomelo_platform_t * platform,
-    pomelo_threadsafe_executor_t * executor,
+    pomelo_platform_handle_t * executor_handle,
     pomelo_platform_task_entry entry,
     void * data
 );

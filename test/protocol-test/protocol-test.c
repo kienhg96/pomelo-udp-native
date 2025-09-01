@@ -86,7 +86,6 @@ int main(void) {
     platform_options.uv_loop = &uv_loop;
     platform = pomelo_platform_uv_create(&platform_options);
     pomelo_check(platform != NULL);
-    pomelo_platform_startup(platform);
 
     // Initialize sequencer
     pomelo_sequencer_init(&sequencer);
@@ -317,7 +316,6 @@ void pomelo_protocol_socket_on_received(
         pomelo_protocol_peer_send(peer, view, 1);
         pomelo_protocol_socket_stop(client);
         pomelo_protocol_socket_stop(server);
-        // pomelo_platform_shutdown(platform, NULL);
     } else {
         printf("Client got %zu bytes from server\n", view->length);
         int32_t v1 = 0;

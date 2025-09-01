@@ -12,6 +12,11 @@ static void test_free(void * ctx, void * ptr) {
     free(ptr);
 }
 
+static void * test_realloc(void * ctx, void * ptr, size_t size) {
+    (void) ctx;
+    return realloc(ptr, size);
+}
+
 int pomelo_test_allocator(void) {
     // Test default allocator
     pomelo_allocator_t * allocator = pomelo_allocator_default();
@@ -27,7 +32,8 @@ int pomelo_test_allocator(void) {
     pomelo_allocator_t * custom_allocator = pomelo_allocator_create(
         NULL,           // context
         test_malloc,    // alloc callback
-        test_free      // free callback
+        test_realloc,   // realloc callback
+        test_free       // free callback
     );
     
     pomelo_check(custom_allocator != NULL);

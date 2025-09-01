@@ -72,7 +72,7 @@ struct pomelo_delivery_dispatcher_s {
     pomelo_sequencer_t * sequencer;
 
     /// @brief The timer for resending command (reliable only)
-    pomelo_platform_timer_handle_t resend_timer;
+    pomelo_platform_handle_t resend_timer;
 
     /// @brief The resend task
     pomelo_sequencer_task_t resend_task;

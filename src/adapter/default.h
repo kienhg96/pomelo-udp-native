@@ -13,6 +13,13 @@ extern "C" {
     This adapter prevents all unencrypted packets from delivering.
 */
 
+
+#define POMELO_ADAPTER_FLAG_CONNECTING (1 << 0)
+#define POMELO_ADAPTER_FLAG_LISTENING (1 << 1)
+#define POMELO_ADAPTER_FLAG_STARTED \
+    (POMELO_ADAPTER_FLAG_CONNECTING | POMELO_ADAPTER_FLAG_LISTENING)
+
+
 struct pomelo_adapter_s {
     /// @brief Extra data of adater
     void * extra;
@@ -24,7 +31,10 @@ struct pomelo_adapter_s {
     pomelo_platform_t * platform;
 
     /// @brief Current UDP socket
-    pomelo_platform_udp_t * udp;
+    pomelo_platform_handle_t udp;
+
+    /// @brief The flags of this adapter
+    uint32_t flags;
 };
 
 

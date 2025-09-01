@@ -100,7 +100,11 @@ int pomelo_delivery_receiver_init(
     receiver->expired_entry = NULL;
     receiver->sequence_entry = NULL;
     receiver->flags = 0;
-    receiver->checksum_verify_task = NULL;
+    memset(
+        &receiver->checksum_verify_task,
+        0,
+        sizeof(receiver->checksum_verify_task)
+    );
     receiver->checksum_compute_result = 0;
 
     // Add command to map
@@ -214,14 +218,13 @@ void pomelo_delivery_receiver_cancel(pomelo_delivery_receiver_t * receiver) {
     receiver->expired_entry = NULL;
     receiver->sequence_entry = NULL;
 
-    if (receiver->checksum_verify_task) {
-        // Verification task has been submitted to worker thread, wait until
-        // the callback is called
-        pomelo_platform_cancel_worker_task(
-            receiver->platform,
-            receiver->checksum_verify_task
-        );
-    } else {
+    // Cancel the checksum verification task (if any)
+    pomelo_platform_cancel_worker_task(
+        receiver->platform,
+        &receiver->checksum_verify_task
+    );
+
+    if (!(receiver->flags & POMELO_DELIVERY_RECEIVER_FLAG_COMPUTING_CHECKSUM)) {
         // Verification task has not been submitted, call the callback directly
         pomelo_delivery_receiver_complete(receiver);
     }
@@ -333,12 +336,12 @@ static void verify_checksum_entry(pomelo_delivery_receiver_t * receiver) {
 /// @brief Complete the checksum verification task
 static void verify_checksum_complete(
     pomelo_delivery_receiver_t * receiver,
-    bool canceled
+    uint32_t flags
 ) {
     assert(receiver != NULL);
-    receiver->checksum_verify_task = NULL;
 
-    if (canceled) {
+    receiver->flags &= ~POMELO_DELIVERY_RECEIVER_FLAG_COMPUTING_CHECKSUM;
+    if (flags & POMELO_PLATFORM_TASK_FLAG_CANCELED) {
         receiver->flags |= POMELO_DELIVERY_RECEIVER_FLAG_CANCELED;
     }
 
@@ -404,16 +407,19 @@ void pomelo_delivery_receiver_verify_checksum(
     content->length -= POMELO_CRYPTO_CHECKSUM_BYTES;
 
     // Submit the checksum verification task
-    receiver->checksum_verify_task = pomelo_platform_submit_worker_task(
+    receiver->flags |= POMELO_DELIVERY_RECEIVER_FLAG_COMPUTING_CHECKSUM;
+    int ret = pomelo_platform_submit_worker_task(
         receiver->platform,
         (pomelo_platform_task_entry) verify_checksum_entry,
         (pomelo_platform_task_complete) verify_checksum_complete,
-        receiver
+        receiver,
+        &receiver->checksum_verify_task
     );
 
-    if (!receiver->checksum_verify_task) {
+    if (ret < 0) {
         // Failed to submit the checksum verification task
         receiver->flags |= POMELO_DELIVERY_RECEIVER_FLAG_FAILED;
+        receiver->flags &= ~POMELO_DELIVERY_RECEIVER_FLAG_COMPUTING_CHECKSUM;
         pomelo_pipeline_finish(&receiver->pipeline);
         return;
     }

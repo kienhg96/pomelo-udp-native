@@ -22,12 +22,6 @@ typedef struct pomelo_threadsafe_executor_s pomelo_threadsafe_executor_t;
 
 ### Platform Lifecycle
 ```c
-// Initialize the platform
-void pomelo_platform_startup(pomelo_platform_t* platform);
-
-// Shutdown the platform
-void pomelo_platform_shutdown(pomelo_platform_t* platform);
-
 // Set/get platform extra data
 void pomelo_platform_set_extra(pomelo_platform_t* platform, void* data);
 void* pomelo_platform_get_extra(pomelo_platform_t* platform);
@@ -134,8 +128,6 @@ pomelo_platform_uv_options_init(&options);
 // Create new instance of libuv platform
 pomelo_platform_t* platform = pomelo_platform_uv_create(&options);
 
-// Startup the platform
-pomelo_platform_startup(platform);
 ```
 
 2. Use thread-safe executors for cross-thread operations
@@ -147,12 +139,6 @@ pomelo_threadsafe_executor_t* executor =
 pomelo_threadsafe_executor_submit(executor, task_entry, task_data);
 ```
 
-3. Proper shutdown sequence
-```c
-pomelo_platform_release_threadsafe_executor(platform, executor);
-pomelo_platform_shutdown(platform);
-```
-
 ### Thread Safety Considerations
 
 #### Thread-Safe Operations
@@ -161,7 +147,6 @@ pomelo_platform_shutdown(platform);
 - Extra data access
 
 #### Main Thread Only
-- Platform startup/shutdown
 - Executor acquisition/release
 - Timer management
 
@@ -192,9 +177,6 @@ if (!platform) {
     return -1;
 }
 
-// Start the platform
-pomelo_platform_startup(platform);
-
 // Create thread-safe executor
 pomelo_threadsafe_executor_t* executor = 
     pomelo_platform_acquire_threadsafe_executor(platform);
@@ -203,7 +185,6 @@ pomelo_threadsafe_executor_t* executor =
 
 // Cleanup
 pomelo_platform_release_threadsafe_executor(platform, executor);
-pomelo_platform_shutdown(platform);
 ```
 
 ### Task Execution

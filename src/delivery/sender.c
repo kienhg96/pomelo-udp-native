@@ -90,7 +90,11 @@ int pomelo_delivery_sender_init(
     sender->completed_counter = 0;
     sender->success_counter = 0;
     sender->flags = 0;
-    sender->checksum_update_task = NULL;
+    memset(
+        &sender->checksum_update_task,
+        0,
+        sizeof(sender->checksum_update_task)
+    );
     sender->checksum_compute_result = 0;
 
     if (parcel->chunks->size == 0) {
@@ -235,16 +239,15 @@ static void update_checksum_entry(pomelo_delivery_sender_t * sender) {
 /// @brief Handle the checksum update complete event
 static void update_checksum_complete(
     pomelo_delivery_sender_t * sender,
-    bool canceled
+    uint32_t flags
 ) {
     assert(sender != NULL);
-    sender->checksum_update_task = NULL;
 
     if (sender->checksum_compute_result < 0) {
         sender->flags |= POMELO_DELIVERY_SENDER_FLAG_FAILED;
     }
 
-    if (canceled) {
+    if (flags & POMELO_PLATFORM_TASK_FLAG_CANCELED) {
         sender->flags |= POMELO_DELIVERY_SENDER_FLAG_CANCELED;
     }
 
@@ -269,13 +272,14 @@ void pomelo_delivery_sender_update_checksum(pomelo_delivery_sender_t * sender) {
     }
 
     // Submit the checksum update task
-    sender->checksum_update_task = pomelo_platform_submit_worker_task(
+    int ret = pomelo_platform_submit_worker_task(
         sender->platform,
         (pomelo_platform_task_entry) update_checksum_entry,
         (pomelo_platform_task_complete) update_checksum_complete,
-        sender
+        sender,
+        &sender->checksum_update_task
     );
-    if (!sender->checksum_update_task) {
+    if (ret < 0) {
         // Failed to submit the checksum update task
         sender->flags |= POMELO_DELIVERY_SENDER_FLAG_FAILED;
         pomelo_pipeline_finish(&sender->pipeline);
@@ -369,13 +373,11 @@ void pomelo_delivery_sender_cancel(pomelo_delivery_sender_t * sender) {
     }
     sender->flags |= POMELO_DELIVERY_SENDER_FLAG_CANCELED;
 
-    if (sender->checksum_update_task) {
-        pomelo_platform_cancel_worker_task(
-            sender->platform,
-            sender->checksum_update_task
-        );
-        sender->checksum_update_task = NULL;
-    }
+    // Cancel the checksum update task (if any)
+    pomelo_platform_cancel_worker_task(
+        sender->platform,
+        &sender->checksum_update_task
+    );
 
     pomelo_delivery_dispatcher_t * dispatcher = NULL;
     while (pomelo_list_pop_front(sender->dispatchers, &dispatcher) == 0) {

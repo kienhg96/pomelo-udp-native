@@ -13,10 +13,12 @@ int POMELO_PLUGIN_CALL pomelo_plugin_executor_startup(
 
     pomelo_platform_t * platform = impl->platform;
 
-    if (impl->executor) return 0; // Already started
+    if (impl->flags & POMELO_PLUGIN_FLAG_EXECUTOR_STARTED) return 0; // Already started
 
-    impl->executor = pomelo_platform_acquire_threadsafe_executor(platform);
-    if (!impl->executor) return -1; // Failed to acquire executor
+    int ret = pomelo_platform_acquire_executor(platform, &impl->executor);
+    if (ret < 0) return ret; // Failed to acquire executor
+
+    impl->flags |= POMELO_PLUGIN_FLAG_EXECUTOR_STARTED;
 
     return 0;
 }
@@ -33,10 +35,10 @@ void POMELO_PLUGIN_CALL pomelo_plugin_executor_shutdown(
 
     pomelo_platform_t * platform = impl->platform;
 
-    if (!impl->executor) return; // Not started
+    if (!(impl->flags & POMELO_PLUGIN_FLAG_EXECUTOR_STARTED)) return; // Not started
 
-    pomelo_platform_release_threadsafe_executor(platform, impl->executor);
-    impl->executor = NULL;
+    pomelo_platform_release_executor(platform, &impl->executor);
+    impl->flags &= ~POMELO_PLUGIN_FLAG_EXECUTOR_STARTED;
 }
 
 
@@ -73,7 +75,7 @@ int POMELO_PLUGIN_CALL pomelo_plugin_executor_submit(
     pomelo_plugin_impl_t * impl = (pomelo_plugin_impl_t *) plugin;
     pomelo_plugin_check_signature(impl);
 
-    if (!impl->executor) return -1; // Not started
+    if (!(impl->flags & POMELO_PLUGIN_FLAG_EXECUTOR_STARTED)) return -1; // Not started
 
     pomelo_plugin_executor_command_t * command =
         pomelo_pool_acquire(impl->command_pool, NULL);
@@ -83,12 +85,10 @@ int POMELO_PLUGIN_CALL pomelo_plugin_executor_submit(
     command->callback = callback;
     command->data = data;
 
-    pomelo_threadsafe_executor_submit(
+    return pomelo_platform_executor_submit(
         impl->platform,
-        impl->executor,
+        &impl->executor,
         (pomelo_platform_task_entry) executor_command_callback,
         command
     );
-
-    return 0;
 }

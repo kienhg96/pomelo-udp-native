@@ -409,7 +409,6 @@ void pomelo_protocol_socket_on_disconnected(
     pomelo_track_function();
     printf("[i] Disconnected from server.\n");
     pomelo_protocol_socket_stop(socket);
-    pomelo_platform_shutdown(platform, NULL);
 }
 
 
@@ -477,7 +476,6 @@ int main(void) {
     platform_options.uv_loop = &uv_loop;
     platform = pomelo_platform_uv_create(&platform_options);
     pomelo_check(platform != NULL);
-    pomelo_platform_startup(platform);
 
     // Initialize sequencer
     pomelo_sequencer_init(&sequencer);
@@ -585,7 +583,6 @@ int main(void) {
     pomelo_check(ret == 0);
 
     // Run the loop
-    pomelo_platform_startup(platform);
     uv_run(&uv_loop, UV_RUN_DEFAULT);
     uv_loop_close(&uv_loop);
 

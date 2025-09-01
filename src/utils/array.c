@@ -86,15 +86,15 @@ int pomelo_array_ensure_size(pomelo_array_t * array, size_t size) {
     size_t capacity = double_capacity * n;
     pomelo_allocator_t * allocator = array->allocator;
 
-    void * elements =
-        pomelo_allocator_malloc(allocator, capacity * array->element_size);
+    void * elements = pomelo_allocator_realloc(
+        allocator,
+        array->elements,
+        capacity * array->element_size
+    );
     if (!elements) {
         // Cannot allocate a new space for elements
         return -1;
     }
-
-    memcpy(elements, array->elements, array->capacity * array->element_size);
-    pomelo_allocator_free(allocator, array->elements);
 
     // Update elements & capacity
     array->elements = elements;

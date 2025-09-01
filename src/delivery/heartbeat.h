@@ -34,7 +34,7 @@ struct pomelo_delivery_heartbeat_s {
     pomelo_list_t * endpoints;
 
     /// @brief Timer handle
-    pomelo_platform_timer_handle_t timer_handle;
+    pomelo_platform_handle_t timer_handle;
 };
 
 

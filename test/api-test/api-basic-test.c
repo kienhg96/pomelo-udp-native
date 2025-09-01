@@ -95,9 +95,6 @@ int main(void) {
     platform = pomelo_test_platform_create(allocator);
     pomelo_check(platform != NULL);
 
-    // Start the platform
-    pomelo_platform_startup(platform);
-
     // Create token
     int ret = init_connect_token();
     pomelo_check(ret == 0);
@@ -338,9 +335,6 @@ static void check_finished(void) {
     printf("[i] Stopping client & server\n");
     pomelo_socket_stop(server);
     pomelo_socket_stop(client);
-
-    printf("[i] Shutting down the platform\n");
-    pomelo_platform_shutdown(platform, NULL);
 }
 
 

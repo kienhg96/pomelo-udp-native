@@ -62,7 +62,7 @@ struct pomelo_protocol_receiver_s {
     pomelo_protocol_crypto_context_t * crypto_ctx;
 
     /// @brief The async task of this receiver
-    pomelo_platform_task_t * task;
+    pomelo_platform_handle_t task;
 
     /// @brief Entry of this receiver in peer receivers list
     pomelo_list_entry_t * entry;

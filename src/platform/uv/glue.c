@@ -14,48 +14,48 @@ void * pomelo_platform_get_extra(pomelo_platform_t * platform) {
 }
 
 
-void pomelo_platform_startup(pomelo_platform_t * platform) {
-    pomelo_platform_uv_startup((pomelo_platform_uv_t *) platform);
-}
-
-
-void pomelo_platform_shutdown(
+int pomelo_platform_close(
     pomelo_platform_t * platform,
-    pomelo_platform_shutdown_callback callback
+    pomelo_platform_callback callback
 ) {
-    pomelo_platform_uv_shutdown((pomelo_platform_uv_t *) platform, callback);
-}
-
-
-pomelo_threadsafe_executor_t * pomelo_platform_acquire_threadsafe_executor(
-    pomelo_platform_t * platform
-) {
-    return pomelo_platform_uv_acquire_threadsafe_executor(
-        (pomelo_platform_uv_t *) platform
-    );
-}
-
-
-void pomelo_platform_release_threadsafe_executor(
-    pomelo_platform_t * platform,
-    pomelo_threadsafe_executor_t * executor
-) {
-    pomelo_platform_uv_release_threadsafe_executor(
+    return pomelo_platform_uv_close(
         (pomelo_platform_uv_t *) platform,
-        executor
+        callback
     );
 }
 
 
-pomelo_platform_task_t * pomelo_threadsafe_executor_submit(
+int pomelo_platform_acquire_executor(
     pomelo_platform_t * platform,
-    pomelo_threadsafe_executor_t * executor,
+    pomelo_platform_handle_t * executor_handle
+) {
+    return pomelo_platform_uv_acquire_executor(
+        (pomelo_platform_uv_t *) platform,
+        executor_handle
+    );
+}
+
+
+void pomelo_platform_release_executor(
+    pomelo_platform_t * platform,
+    pomelo_platform_handle_t * executor_handle
+) {
+    pomelo_platform_uv_release_executor(
+        (pomelo_platform_uv_t *) platform,
+        executor_handle
+    );
+}
+
+
+int pomelo_platform_executor_submit(
+    pomelo_platform_t * platform,
+    pomelo_platform_handle_t * executor_handle,
     pomelo_platform_task_entry entry,
     void * data
 ) {
-    return pomelo_threadsafe_executor_uv_submit(
+    return pomelo_platform_uv_executor_submit(
         (pomelo_platform_uv_t *) platform,
-        executor,
+        executor_handle,
         entry,
         data
     );
@@ -78,7 +78,7 @@ int pomelo_platform_timer_start(
     uint64_t timeout_ms,
     uint64_t repeat_ms,
     void * data,
-    pomelo_platform_timer_handle_t * handle
+    pomelo_platform_handle_t * timer_handle
 ) {
     return pomelo_platform_uv_timer_start(
         (pomelo_platform_uv_t *) platform,
@@ -86,55 +86,59 @@ int pomelo_platform_timer_start(
         timeout_ms,
         repeat_ms,
         data,
-        handle
+        timer_handle
     );
 }
 
 
 void pomelo_platform_timer_stop(
     pomelo_platform_t * platform,
-    pomelo_platform_timer_handle_t * handle
+    pomelo_platform_handle_t * timer_handle
 ) {
-    pomelo_platform_uv_timer_stop((pomelo_platform_uv_t *) platform, handle);
+    pomelo_platform_uv_timer_stop(
+        (pomelo_platform_uv_t *) platform,
+        timer_handle
+    );
 }
 
 
-pomelo_platform_udp_t * pomelo_platform_udp_bind(
+int pomelo_platform_udp_bind(
     pomelo_platform_t * platform,
-    pomelo_address_t * address
+    pomelo_address_t * address,
+    pomelo_platform_handle_t * udp_handle
 ) {
     return pomelo_platform_uv_udp_bind(
         (pomelo_platform_uv_t *) platform,
-        address
+        address,
+        udp_handle
     );
 }
 
 
-pomelo_platform_udp_t * pomelo_platform_udp_connect(
+int pomelo_platform_udp_connect(
     pomelo_platform_t * platform,
-    pomelo_address_t * address
+    pomelo_address_t * address,
+    pomelo_platform_handle_t * udp_handle
 ) {
     return pomelo_platform_uv_udp_connect(
         (pomelo_platform_uv_t *) platform,
-        address
+        address,
+        udp_handle
     );
 }
 
 
-int pomelo_platform_udp_stop(
+void pomelo_platform_udp_stop(
     pomelo_platform_t * platform,
-    pomelo_platform_udp_t * socket
+    pomelo_platform_handle_t * udp_handle
 ) {
-    return pomelo_platform_uv_udp_stop(
-        (pomelo_platform_uv_t *) platform,
-        socket
-    );
+    pomelo_platform_uv_udp_stop((pomelo_platform_uv_t *) platform, udp_handle);
 }
 
 
 int pomelo_platform_udp_send(
     pomelo_platform_t * platform,
-    pomelo_platform_udp_t * socket,
+    pomelo_platform_handle_t * udp_handle,
     pomelo_address_t * address,
     int nbuffers,
     pomelo_platform_iovec_t * buffers,
@@ -143,7 +147,7 @@ int pomelo_platform_udp_send(
 ) {
     return pomelo_platform_uv_udp_send(
         (pomelo_platform_uv_t *) platform,
-        socket,
+        udp_handle,
         address,
         nbuffers,
         buffers,
@@ -155,14 +159,14 @@ int pomelo_platform_udp_send(
 
 void pomelo_platform_udp_recv_start(
     pomelo_platform_t * platform,
-    pomelo_platform_udp_t * socket,
+    pomelo_platform_handle_t * udp_handle,
     void * context,
     pomelo_platform_alloc_cb alloc_callback,
     pomelo_platform_recv_cb recv_callback
 ) {
     pomelo_platform_uv_udp_recv_start(
         (pomelo_platform_uv_t *) platform,
-        socket,
+        udp_handle,
         context,
         alloc_callback,
         recv_callback
@@ -170,27 +174,29 @@ void pomelo_platform_udp_recv_start(
 }
 
 
-pomelo_platform_task_t * pomelo_platform_submit_worker_task(
+int pomelo_platform_submit_worker_task(
     pomelo_platform_t * platform,
     pomelo_platform_task_entry entry,
     pomelo_platform_task_complete complete,
-    void * data
+    void * data,
+    pomelo_platform_handle_t * task_handle
 ) {
     return pomelo_platform_uv_submit_worker_task(
         (pomelo_platform_uv_t *) platform,
         entry,
         complete,
-        data
+        data,
+        task_handle
     );
 }
 
 
 void pomelo_platform_cancel_worker_task(
     pomelo_platform_t * platform,
-    pomelo_platform_task_t * task
+    pomelo_platform_handle_t * task_handle
 ) {
     pomelo_platform_uv_cancel_worker_task(
         (pomelo_platform_uv_t *) platform,
-        task
+        task_handle
     );
 }

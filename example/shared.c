@@ -32,7 +32,6 @@ void pomelo_example_env_init(
     pomelo_platform_t * platform = pomelo_platform_uv_create(&platform_options);
     assert(platform != NULL);
     env->platform = platform;
-    pomelo_platform_startup(platform);
 
     // Create context
     pomelo_context_root_options_t context_options = {
@@ -88,7 +87,6 @@ void pomelo_example_env_finalize(pomelo_example_env_t * env) {
     pomelo_context_destroy(context);
     
     // Destroy the platform
-    pomelo_platform_shutdown(platform, NULL);
     pomelo_platform_uv_destroy(platform);
 
     // Close UV loop

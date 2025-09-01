@@ -63,9 +63,6 @@ int main(void) {
     platform = pomelo_platform_uv_create(&platform_options);
     pomelo_check(platform != NULL);
 
-    // Start the platform
-    pomelo_platform_startup(platform);
-
     // Create api context
     pomelo_context_root_options_t context_options = {
         .allocator = allocator
@@ -183,9 +180,6 @@ void pomelo_socket_on_received(
     int ret = pomelo_message_read_int32(message, &value);
     pomelo_check(ret == 0);
     pomelo_check(value == 4455);
-
-    // Done testing
-    pomelo_platform_shutdown(platform, NULL);
 }
 
 

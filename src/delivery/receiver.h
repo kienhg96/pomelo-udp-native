@@ -14,8 +14,9 @@ extern "C" {
 #endif
 
 
-#define POMELO_DELIVERY_RECEIVER_FLAG_CANCELED (1 << 0)
-#define POMELO_DELIVERY_RECEIVER_FLAG_FAILED   (1 << 1)
+#define POMELO_DELIVERY_RECEIVER_FLAG_CANCELED           (1 << 0)
+#define POMELO_DELIVERY_RECEIVER_FLAG_FAILED             (1 << 1)
+#define POMELO_DELIVERY_RECEIVER_FLAG_COMPUTING_CHECKSUM (1 << 2)
 
 
 /// @brief The information of the receiver
@@ -60,7 +61,7 @@ struct pomelo_delivery_receiver_s {
     uint32_t flags;
 
     /// @brief The task of checksum verification
-    pomelo_platform_task_t * checksum_verify_task;
+    pomelo_platform_handle_t checksum_verify_task;
 
     /// @brief The result of checksum computation
     int checksum_compute_result;

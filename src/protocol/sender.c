@@ -1,4 +1,5 @@
 #include <assert.h>
+#include <string.h>
 #include "sender.h"
 #include "socket.h"
 #include "context.h"
@@ -46,6 +47,7 @@ int pomelo_protocol_sender_init(
     sender->flags = flags;
     sender->codec_ctx = peer->crypto_ctx;
     pomelo_protocol_crypto_context_ref(sender->codec_ctx);
+    memset(&sender->task, 0, sizeof(sender->task));
 
     sender->packet = packet;
 
@@ -160,12 +162,11 @@ static void sender_process_entry(pomelo_protocol_sender_t * sender) {
 /// @brief Complete callback of sender
 static void sender_process_complete(
     pomelo_protocol_sender_t * sender,
-    bool canceled
+    uint32_t flags
 ) {
     assert(sender != NULL);
-    sender->task = NULL;
 
-    if (canceled) {
+    if (flags & POMELO_PLATFORM_TASK_FLAG_CANCELED) {
         sender->flags |= POMELO_PROTOCOL_SENDER_FLAG_CANCELED;
     }
 
@@ -198,14 +199,15 @@ void pomelo_protocol_sender_process(pomelo_protocol_sender_t * sender) {
     }
 
     // Submit task to worker
-    sender->task = pomelo_platform_submit_worker_task(
+    int ret = pomelo_platform_submit_worker_task(
         sender->platform,
         (pomelo_platform_task_entry) sender_process_entry,
         (pomelo_platform_task_complete) sender_process_complete,
-        sender
+        sender,
+        &sender->task
     );
 
-    if (!sender->task) {
+    if (ret < 0) {
         // Failed to submit to worker
         sender->flags |= POMELO_PROTOCOL_SENDER_FLAG_FAILED;
         pomelo_pipeline_finish(&sender->pipeline);
@@ -268,11 +270,8 @@ void pomelo_protocol_sender_cancel(pomelo_protocol_sender_t * sender) {
     }
     sender->flags |= POMELO_PROTOCOL_SENDER_FLAG_CANCELED;
 
-    // Cancel the task
-    if (sender->task) {
-        pomelo_platform_cancel_worker_task(sender->platform, sender->task);
-        sender->task = NULL;
-    }
+    // Cancel the task (if any)
+    pomelo_platform_cancel_worker_task(sender->platform, &sender->task);
 
     // Remove the sender from the peer's sending senders list
     if (sender->entry && sender->peer) {

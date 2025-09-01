@@ -79,10 +79,10 @@ struct pomelo_protocol_emitter_s {
     uint32_t trigger_counter;
 
     /// @brief The triggering timer
-    pomelo_platform_timer_handle_t trigger_timer;
+    pomelo_platform_handle_t trigger_timer;
 
     /// @brief The timer of timing out
-    pomelo_platform_timer_handle_t timeout_timer;
+    pomelo_platform_handle_t timeout_timer;
 
     /// @brief The task of triggering
     pomelo_sequencer_task_t trigger_task;

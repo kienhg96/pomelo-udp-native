@@ -18,6 +18,13 @@ typedef void * (*pomelo_alloc_callback)(void * context, size_t size);
 /// @brief Free callback
 typedef void (*pomelo_free_callback)(void * context, void * mem);
 
+/// @brief Reallocate callback
+typedef void * (*pomelo_realloc_callback)(
+    void * context,
+    void * mem,
+    size_t size
+);
+
 /// @brief Allocate failure callback
 typedef void (*pomelo_alloc_failure_callback)(void * context, size_t length);
 
@@ -42,6 +49,13 @@ void * pomelo_allocator_malloc(pomelo_allocator_t * allocator, size_t size);
 /// @brief Free a block of memory
 void pomelo_allocator_free(pomelo_allocator_t * allocator, void * mem);
 
+/// @brief Reallocate a block of memory
+void * pomelo_allocator_realloc(
+    pomelo_allocator_t * allocator,
+    void * mem,
+    size_t size
+);
+
 /// @brief Get the default allocator
 pomelo_allocator_t * pomelo_allocator_default(void);
 
@@ -52,6 +66,7 @@ uint64_t pomelo_allocator_allocated_bytes(pomelo_allocator_t * allocator);
 pomelo_allocator_t * pomelo_allocator_create(
     void * context,
     pomelo_alloc_callback alloc_callback,
+    pomelo_realloc_callback realloc_callback,
     pomelo_free_callback free_callback
 );
 
