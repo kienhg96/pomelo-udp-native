@@ -48,39 +48,39 @@ pomelo_platform_t * pomelo_platform_uv_create(
     platform->allocator = allocator;
     platform->uv_loop = uv_loop;
 
-    // Initialize idle handle for shutdown
-    uv_idle_init(uv_loop, &platform->shutdown_idle);
-    platform->shutdown_idle.data = platform;
+    // Initialize idle handle for close
+    uv_idle_init(uv_loop, &platform->idle_close);
+    platform->idle_close.data = platform;
 
-    platform->worker_controller = 
-        pomelo_platform_worker_controller_create(platform, allocator, uv_loop);
-    if (!platform->worker_controller) {
+    platform->worker_mgr = 
+        pomelo_platform_uv_worker_mgr_create(platform, allocator, uv_loop);
+    if (!platform->worker_mgr) {
         pomelo_platform_uv_destroy((pomelo_platform_t *) platform);
         return NULL;
     }
 
-    platform->threadsafe_controller =
-        pomelo_platform_threadsafe_controller_create(
+    platform->executor_mgr =
+        pomelo_platform_uv_executor_mgr_create(
             platform, allocator, uv_loop
         );
-    if (!platform->threadsafe_controller) {
+    if (!platform->executor_mgr) {
         pomelo_platform_uv_destroy((pomelo_platform_t *) platform);
         return NULL;
     }
 
-    platform->udp_controller = pomelo_platform_udp_controller_create(
+    platform->udp_mgr = pomelo_platform_uv_udp_mgr_create(
         platform, allocator, uv_loop
     );
-    if (!platform->udp_controller) {
+    if (!platform->udp_mgr) {
         pomelo_platform_uv_destroy((pomelo_platform_t *) platform);
         return NULL;
     }
     
     // Create timer manager
-    platform->timer_controller = pomelo_platform_timer_controller_create(
+    platform->timer_mgr = pomelo_platform_uv_timer_mgr_create(
         platform, allocator, uv_loop
     );
-    if (!platform->timer_controller) {
+    if (!platform->timer_mgr) {
         pomelo_platform_uv_destroy((pomelo_platform_t *) platform);
         return NULL;
     }
@@ -93,28 +93,24 @@ void pomelo_platform_uv_destroy(pomelo_platform_t * platform) {
     assert(platform != NULL);
     pomelo_platform_uv_t * uv_platform = (pomelo_platform_uv_t *) platform;
 
-    if (uv_platform->timer_controller) {
-        pomelo_platform_timer_controller_destroy(uv_platform->timer_controller);
-        uv_platform->timer_controller = NULL;
+    if (uv_platform->timer_mgr) {
+        pomelo_platform_uv_timer_mgr_destroy(uv_platform->timer_mgr);
+        uv_platform->timer_mgr = NULL;
     }
 
-    if (uv_platform->threadsafe_controller) {
-        pomelo_platform_threadsafe_controller_destroy(
-            uv_platform->threadsafe_controller
-        );
-        uv_platform->threadsafe_controller = NULL;
+    if (uv_platform->executor_mgr) {
+        pomelo_platform_uv_executor_mgr_destroy(uv_platform->executor_mgr);
+        uv_platform->executor_mgr = NULL;
     }
 
-    if (uv_platform->worker_controller) {
-        pomelo_platform_worker_controller_destroy(
-            uv_platform->worker_controller
-        );
-        uv_platform->worker_controller = NULL;
+    if (uv_platform->worker_mgr) {
+        pomelo_platform_uv_worker_mgr_destroy(uv_platform->worker_mgr);
+        uv_platform->worker_mgr = NULL;
     }
 
-    if (uv_platform->udp_controller) {
-        pomelo_platform_udp_controller_destroy(uv_platform->udp_controller);
-        uv_platform->udp_controller = NULL;
+    if (uv_platform->udp_mgr) {
+        pomelo_platform_uv_udp_mgr_destroy(uv_platform->udp_mgr);
+        uv_platform->udp_mgr = NULL;
     }
 
     pomelo_allocator_free(uv_platform->allocator, uv_platform);    
@@ -130,25 +126,12 @@ void pomelo_platform_uv_statistic(
 
     pomelo_platform_uv_t * uv_platform = (pomelo_platform_uv_t *) platform;
 
-    pomelo_platform_timer_controller_statistic(
-        uv_platform->timer_controller,
-        statistic
+    pomelo_platform_uv_timer_mgr_statistic(uv_platform->timer_mgr, statistic);
+    pomelo_platform_uv_udp_mgr_statistic(uv_platform->udp_mgr, statistic);
+    pomelo_platform_uv_executor_mgr_statistic(
+        uv_platform->executor_mgr, statistic
     );
-
-    pomelo_platform_udp_controller_statistic(
-        uv_platform->udp_controller,
-        statistic
-    );
-
-    pomelo_platform_threadsafe_controller_statistic(
-        uv_platform->threadsafe_controller,
-        statistic
-    );
-
-    pomelo_platform_worker_controller_statistic(
-        uv_platform->worker_controller,
-        statistic
-    );
+    pomelo_platform_uv_worker_mgr_statistic(uv_platform->worker_mgr, statistic);
 }
 
 
@@ -158,108 +141,92 @@ uv_loop_t * pomelo_platform_uv_get_uv_loop(pomelo_platform_t * platform) {
 }
 
 
-void pomelo_platform_uv_startup(pomelo_platform_uv_t * platform) {
-    assert(platform != NULL);
-
-    platform->running = true;
-    pomelo_platform_udp_controller_startup(platform->udp_controller);
-    pomelo_platform_timer_controller_startup(platform->timer_controller);
-    pomelo_platform_threadsafe_controller_startup(
-        platform->threadsafe_controller
-    );
-    pomelo_platform_worker_controller_startup(platform->worker_controller);
-}
-
-
-static void shutdown_idle_cb(uv_idle_t * handle) {
+static void idle_close_cb(uv_idle_t * handle) {
     pomelo_platform_uv_t * platform = handle->data;
     assert(platform != NULL);
 
     uv_idle_stop(handle);
 
-    pomelo_platform_udp_controller_shutdown(platform->udp_controller);
-    pomelo_platform_timer_controller_shutdown(platform->timer_controller);
-    pomelo_platform_threadsafe_controller_shutdown(
-        platform->threadsafe_controller
-    );
-    pomelo_platform_worker_controller_shutdown(platform->worker_controller);
+    pomelo_platform_uv_udp_mgr_close(platform->udp_mgr);
+    pomelo_platform_uv_timer_mgr_close(platform->timer_mgr);
+    pomelo_platform_uv_executor_mgr_close(platform->executor_mgr);
+    pomelo_platform_uv_worker_mgr_close(platform->worker_mgr);
 }
 
 
-void pomelo_platform_uv_shutdown(
+int pomelo_platform_uv_close(
     pomelo_platform_uv_t * platform,
-    pomelo_platform_shutdown_callback callback
+    pomelo_platform_callback callback
 ) {
     assert(platform != NULL);
-    if (!platform->running) return; // Already shutting down
+    if (platform->flags & POMELO_PLATFORM_UV_FLAG_CLOSING) {
+        return -1; // The platform is closing
+    }
 
-    platform->running = false;
-    platform->shutdown_callback = callback;
-    platform->shutdown_components = 0;
+    platform->flags |= POMELO_PLATFORM_UV_FLAG_CLOSING;
+    platform->closed_callback = callback;
+    platform->closed_components = 0;
 
-    uv_idle_start(&platform->shutdown_idle, shutdown_idle_cb);
+    uv_idle_start(&platform->idle_close, idle_close_cb);
+    return 0;
 }
 
 
-void pomelo_platform_threadsafe_controller_on_shutdown(
-    pomelo_platform_threadsafe_controller_t * controller
+void pomelo_platform_uv_executor_mgr_on_closed(
+    pomelo_platform_uv_executor_mgr_t * manager
 ) {
-    assert(controller != NULL);
-    pomelo_platform_uv_t * platform = controller->platform;
+    assert(manager != NULL);
+    pomelo_platform_uv_t * platform = manager->platform;
     assert(platform != NULL);
-    assert(!platform->running);
 
-    platform->shutdown_components |= POMELO_PLATFORM_UV_COMPONENT_THREADSAFE;
-    pomelo_platform_check_shutdown(platform);
+    platform->closed_components |= POMELO_PLATFORM_UV_COMPONENT_THREADSAFE;
+    pomelo_platform_uv_check_closed(platform);
 }
 
 
-void pomelo_platform_worker_controller_on_shutdown(
-    pomelo_platform_worker_controller_t * controller
+void pomelo_platform_uv_worker_mgr_on_closed(
+    pomelo_platform_uv_worker_mgr_t * manager
 ) {
-    assert(controller != NULL);
-    pomelo_platform_uv_t * platform = controller->platform;
+    assert(manager != NULL);
+    pomelo_platform_uv_t * platform = manager->platform;
     assert(platform != NULL);
-    assert(!platform->running);
 
-    platform->shutdown_components |= POMELO_PLATFORM_UV_COMPONENT_WORKER;
-    pomelo_platform_check_shutdown(platform);
+    platform->closed_components |= POMELO_PLATFORM_UV_COMPONENT_WORKER;
+    pomelo_platform_uv_check_closed(platform);
 }
 
 
-void pomelo_platform_udp_controller_on_shutdown(
-    pomelo_platform_udp_controller_t * controller
+void pomelo_platform_uv_udp_mgr_on_closed(
+    pomelo_platform_uv_udp_mgr_t * manager
 ) {
-    assert(controller != NULL);
-    pomelo_platform_uv_t * platform = controller->platform;
+    assert(manager != NULL);
+    pomelo_platform_uv_t * platform = manager->platform;
     assert(platform != NULL);
-    assert(!platform->running);
 
-    platform->shutdown_components |= POMELO_PLATFORM_UV_COMPONENT_UDP;
-    pomelo_platform_check_shutdown(platform);
+    platform->closed_components |= POMELO_PLATFORM_UV_COMPONENT_UDP;
+    pomelo_platform_uv_check_closed(platform);
 }
 
 
-void pomelo_platform_timer_controller_on_shutdown(
-    pomelo_platform_timer_controller_t * controller
+void pomelo_platform_uv_timer_mgr_on_closed(
+    pomelo_platform_uv_timer_mgr_t * manager
 ) {
-    assert(controller != NULL);
-    pomelo_platform_uv_t * platform = controller->platform;
+    assert(manager != NULL);
+    pomelo_platform_uv_t * platform = manager->platform;
     assert(platform != NULL);
-    assert(!platform->running);
 
-    platform->shutdown_components |= POMELO_PLATFORM_UV_COMPONENT_TIMER;
-    pomelo_platform_check_shutdown(platform);
+    platform->closed_components |= POMELO_PLATFORM_UV_COMPONENT_TIMER;
+    pomelo_platform_uv_check_closed(platform);
 }
 
 
-void pomelo_platform_check_shutdown(pomelo_platform_uv_t * platform) {
+void pomelo_platform_uv_check_closed(pomelo_platform_uv_t * platform) {
     assert(platform != NULL);
-    assert(!platform->running);
 
-    if (platform->shutdown_components == POMELO_PLATFORM_UV_COMPONENT_ALL &&
-        platform->shutdown_callback
-    ) {
-        platform->shutdown_callback((pomelo_platform_t *) platform);
+    if (platform->closed_components == POMELO_PLATFORM_UV_COMPONENT_ALL) {
+        platform->flags &= ~POMELO_PLATFORM_UV_FLAG_CLOSING;
+        if (platform->closed_callback) {
+            platform->closed_callback((pomelo_platform_t *) platform);
+        }
     }
 }

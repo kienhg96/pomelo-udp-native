@@ -71,13 +71,20 @@ int pomelo_adapter_connect(
 ) {
     assert(adapter != NULL);
     assert(address != NULL);
-    if (adapter->udp) return -1; // Already started
-
-    adapter->udp = pomelo_platform_udp_connect(adapter->platform, address);
-    if (!adapter->udp) {
-        return -1; // Failed to start connecting
+    if (adapter->flags & POMELO_ADAPTER_FLAG_STARTED) {
+        return -1; // Already started
     }
 
+    int ret = pomelo_platform_udp_connect(
+        adapter->platform,
+        address,
+        &adapter->udp
+    );
+    if (ret < 0) {
+        return ret; // Failed to start connecting
+    }
+
+    adapter->flags |= POMELO_ADAPTER_FLAG_CONNECTING;
     pomelo_adapter_recv_start(adapter);
     return 0;
 }
@@ -89,13 +96,20 @@ int pomelo_adapter_listen(
 ) {
     assert(adapter != NULL);
     assert(address != NULL);
-    if (adapter->udp) return -1; // Already started
-
-    adapter->udp = pomelo_platform_udp_bind(adapter->platform, address);
-    if (!adapter->udp) {
-        return -1; // Failed to start listening
+    if (adapter->flags & POMELO_ADAPTER_FLAG_STARTED) {
+        return -1; // Already started
     }
 
+    int ret = pomelo_platform_udp_bind(
+        adapter->platform,
+        address,
+        &adapter->udp
+    );
+    if (ret < 0) {
+        return ret; // Failed to start listening
+    }
+
+    adapter->flags |= POMELO_ADAPTER_FLAG_LISTENING;
     pomelo_adapter_recv_start(adapter);
     return 0;
 }
@@ -103,11 +117,13 @@ int pomelo_adapter_listen(
 
 int pomelo_adapter_stop(pomelo_adapter_t * adapter) {
     assert(adapter != NULL);
-    if (!adapter->udp) return -1;
+    if (!(adapter->flags & POMELO_ADAPTER_FLAG_STARTED)) {
+        return -1; // Not started
+    }
 
-    int ret = pomelo_platform_udp_stop(adapter->platform, adapter->udp);
-    adapter->udp = NULL;
-    return ret;
+    pomelo_platform_udp_stop(adapter->platform, &adapter->udp);
+    adapter->flags &= ~POMELO_ADAPTER_FLAG_STARTED;
+    return 0;
 }
 
 
@@ -130,7 +146,7 @@ int pomelo_adapter_send(
     assert(adapter != NULL);
     assert(view != NULL);
     // Make sure the adapter is running
-    if (!adapter->udp) return -1;
+    if (!(adapter->flags & POMELO_ADAPTER_FLAG_STARTED)) return -1;
 
 #ifdef POMELO_ADAPTER_DEFAULT_NO_ENCRYPTION
     // Default adapter requires all packets must be unencrypted.
@@ -151,7 +167,7 @@ int pomelo_adapter_send(
 
     int ret = pomelo_platform_udp_send(
         adapter->platform,
-        adapter->udp,
+        &adapter->udp,
         address,
         1,
         &vec,
@@ -173,7 +189,7 @@ void pomelo_adapter_alloc_callback(
 ) {
     assert(adapter != NULL);
     assert(iovec != NULL);
-    if (!adapter->udp) {
+    if (!(adapter->flags & POMELO_ADAPTER_FLAG_STARTED)) {
         return; // Make sure the adapter is running
     }
 
@@ -193,7 +209,7 @@ void pomelo_adapter_recv_callback(
 ) {
     assert(adapter != NULL);
     assert(iovec != NULL);
-    if (!adapter->udp) {
+    if (!(adapter->flags & POMELO_ADAPTER_FLAG_STARTED)) {
         return; // Make sure the adapter is running
     }
 
@@ -234,7 +250,7 @@ void pomelo_adapter_recv_start(pomelo_adapter_t * adapter) {
     // Start receiving
     pomelo_platform_udp_recv_start(
         adapter->platform,
-        adapter->udp,
+        &adapter->udp,
         adapter, // context
         (pomelo_platform_alloc_cb) pomelo_adapter_alloc_callback,
         (pomelo_platform_recv_cb) pomelo_adapter_recv_callback

@@ -53,7 +53,6 @@ int main(int argc, char * argv[]) {
     if (!platform) {
         return -1;
     }
-    pomelo_platform_startup(platform);
 
     // Load plugin
     pomelo_plugin_initializer initializer = pomelo_plugin_load_by_path(argv[1]);

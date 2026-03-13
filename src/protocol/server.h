@@ -60,13 +60,13 @@ struct pomelo_protocol_server_s {
     uint64_t challenge_sequence_number;
 
     /// @brief The keep alive timer
-    pomelo_platform_timer_handle_t keep_alive_timer;
+    pomelo_platform_handle_t keep_alive_timer;
 
     /// @brief The timer for sending redundants disconnect packets
-    pomelo_platform_timer_handle_t disconnecting_timer;
+    pomelo_platform_handle_t disconnecting_timer;
 
     /// @brief The timer for removing expired anonymous peers
-    pomelo_platform_timer_handle_t anonymous_timer;
+    pomelo_platform_handle_t anonymous_timer;
 
     /// @brief The task for keep alive
     pomelo_sequencer_task_t keep_alive_task;

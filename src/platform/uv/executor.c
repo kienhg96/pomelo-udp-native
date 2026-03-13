@@ -8,235 +8,229 @@
 /* -------------------------------------------------------------------------- */
 
 
-pomelo_platform_threadsafe_controller_t *
-pomelo_platform_threadsafe_controller_create(
+pomelo_platform_uv_executor_mgr_t * pomelo_platform_uv_executor_mgr_create(
     pomelo_platform_uv_t * platform,
     pomelo_allocator_t * allocator,
     uv_loop_t * uv_loop
 ) {
+    assert(platform != NULL);
     assert(allocator != NULL);
     assert(uv_loop != NULL);
 
-    pomelo_platform_threadsafe_controller_t * controller =
-        pomelo_allocator_malloc_t(
-            allocator,
-            pomelo_platform_threadsafe_controller_t
-        );
-    if (!controller) {
+    pomelo_platform_uv_executor_mgr_t * manager = pomelo_allocator_malloc_t(
+        allocator,
+        pomelo_platform_uv_executor_mgr_t
+    );
+    if (!manager) {
         return NULL;
     }
-    memset(controller, 0, sizeof(pomelo_platform_threadsafe_controller_t));
-    controller->platform = platform;
-    controller->allocator = allocator;
-    controller->uv_loop = uv_loop;
+    memset(manager, 0, sizeof(pomelo_platform_uv_executor_mgr_t));
+    manager->platform = platform;
+    manager->allocator = allocator;
+    manager->uv_loop = uv_loop;
 
-    pomelo_atomic_int64_store(&controller->running, false);
-    pomelo_atomic_uint64_store(&controller->task_counter, 0);
+    pomelo_atomic_uint64_store(&manager->task_counter, 0);
 
     // Create tasks pool
     pomelo_pool_root_options_t pool_options;
     memset(&pool_options, 0, sizeof(pomelo_pool_root_options_t));
     pool_options.allocator = allocator;
-    pool_options.element_size = sizeof(pomelo_platform_task_threadsafe_t);
+    pool_options.element_size = sizeof(pomelo_platform_uv_task_executor_t);
     pool_options.zero_init = true;
     pool_options.synchronized = true;
-    controller->task_pool = pomelo_pool_root_create(&pool_options);
-    if (!controller->task_pool) {
-        pomelo_platform_threadsafe_controller_destroy(controller);
+    manager->task_pool = pomelo_pool_root_create(&pool_options);
+    if (!manager->task_pool) {
+        pomelo_platform_uv_executor_mgr_destroy(manager);
         return NULL;
     }
 
     // Create executor pool
     memset(&pool_options, 0, sizeof(pomelo_pool_root_options_t));
     pool_options.allocator = allocator;
-    pool_options.element_size = sizeof(pomelo_threadsafe_executor_t);
+    pool_options.element_size = sizeof(pomelo_platform_executor_t);
     pool_options.synchronized = true;
-    pool_options.alloc_data = controller;
+    pool_options.alloc_data = manager;
     pool_options.on_alloc = (pomelo_pool_alloc_cb)
-        pomelo_threadsafe_executor_on_alloc;
+        pomelo_platform_executor_on_alloc;
     pool_options.on_free = (pomelo_pool_free_cb)
-        pomelo_threadsafe_executor_on_free;
-    controller->executor_pool = pomelo_pool_root_create(&pool_options);
-    if (!controller->executor_pool) {
-        pomelo_platform_threadsafe_controller_destroy(controller);
+        pomelo_platform_executor_on_free;
+    manager->executor_pool = pomelo_pool_root_create(&pool_options);
+    if (!manager->executor_pool) {
+        pomelo_platform_uv_executor_mgr_destroy(manager);
         return NULL;
     }
 
     // Create executors list
     pomelo_list_options_t list_options = {
         .allocator = allocator,
-        .element_size = sizeof(pomelo_threadsafe_executor_t *),
+        .element_size = sizeof(pomelo_platform_executor_t *),
         .synchronized = true
     };
-    controller->executors = pomelo_list_create(&list_options);
-    if (!controller->executors) {
-        pomelo_platform_threadsafe_controller_destroy(controller);
+    manager->executors = pomelo_list_create(&list_options);
+    if (!manager->executors) {
+        pomelo_platform_uv_executor_mgr_destroy(manager);
         return NULL;
     }
-    return controller;
+    return manager;
 }
 
 
-void pomelo_platform_threadsafe_controller_destroy(
-    pomelo_platform_threadsafe_controller_t * controller
+void pomelo_platform_uv_executor_mgr_destroy(
+    pomelo_platform_uv_executor_mgr_t * manager
 ) {
-    assert(controller != NULL);
-    pomelo_allocator_t * allocator = controller->allocator;
+    assert(manager != NULL);
+    pomelo_allocator_t * allocator = manager->allocator;
 
-    if (controller->task_pool) {
-        pomelo_pool_destroy(controller->task_pool);
-        controller->task_pool = NULL;
+    if (manager->task_pool) {
+        pomelo_pool_destroy(manager->task_pool);
+        manager->task_pool = NULL;
     }
 
-    if (controller->executor_pool) {
-        pomelo_pool_destroy(controller->executor_pool);
-        controller->executor_pool = NULL;
+    if (manager->executor_pool) {
+        pomelo_pool_destroy(manager->executor_pool);
+        manager->executor_pool = NULL;
     }
 
-    if (controller->executors) {
-        pomelo_list_destroy(controller->executors);
-        controller->executors = NULL;
+    if (manager->executors) {
+        pomelo_list_destroy(manager->executors);
+        manager->executors = NULL;
     }
 
-    pomelo_allocator_free(allocator, controller);
+    pomelo_allocator_free(allocator, manager);
 }
 
 
-void pomelo_platform_threadsafe_controller_startup(
-    pomelo_platform_threadsafe_controller_t * controller
+void pomelo_platform_uv_executor_mgr_close(
+    pomelo_platform_uv_executor_mgr_t * manager
 ) {
-    assert(controller != NULL);
-    pomelo_atomic_int64_store(&controller->running, true);
-}
+    assert(manager != NULL);
+    pomelo_list_t * executors = manager->executors;
 
-
-void pomelo_platform_threadsafe_controller_shutdown(
-    pomelo_platform_threadsafe_controller_t * controller
-) {
-    assert(controller != NULL);
-    if (!pomelo_atomic_int64_compare_exchange(
-        &controller->running, /* expected */ true, /* desired */ false
-    )) {
-        return; // Controller is already shutting down
-    }
-
-    pomelo_list_t * executors = controller->executors;
-    if (executors->size == 0) {
-        pomelo_platform_threadsafe_controller_on_shutdown(controller);
-        return;
-    }
-
-    pomelo_threadsafe_executor_t * executor = NULL;
+    // Shutdown all executors
+    pomelo_platform_executor_t * executor = NULL;
     pomelo_list_iterator_t it;
     pomelo_list_iterator_init(&it, executors);
     while (pomelo_list_iterator_next(&it, &executor) == 0) {
-        pomelo_threadsafe_executor_shutdown(executor, controller);
+        pomelo_platform_executor_shutdown(executor, manager);
     }
+
+    // Check close
+    pomelo_platform_uv_executor_mgr_check_closed(manager);
 }
 
 
-void pomelo_platform_threadsafe_controller_statistic(
-    pomelo_platform_threadsafe_controller_t * controller,
+void pomelo_platform_uv_executor_mgr_statistic(
+    pomelo_platform_uv_executor_mgr_t * manager,
     pomelo_statistic_platform_uv_t * statistic
 ) {
-    assert(controller != NULL);
+    assert(manager != NULL);
     assert(statistic != NULL);
     statistic->threadsafe_tasks =
-        pomelo_atomic_uint64_load(&controller->task_counter);
+        pomelo_atomic_uint64_load(&manager->task_counter);
 }
 
 
-pomelo_threadsafe_executor_t * pomelo_platform_uv_acquire_threadsafe_executor(
-    pomelo_platform_uv_t * platform
+int pomelo_platform_uv_acquire_executor(
+    pomelo_platform_uv_t * platform,
+    pomelo_platform_handle_t * executor_handle
 ) {
     assert(platform != NULL);
-    pomelo_platform_threadsafe_controller_t * controller =
-        platform->threadsafe_controller;
+    assert(executor_handle != NULL);
 
-    if (!pomelo_atomic_int64_load(&controller->running)) {
-        return NULL; // Controller is not running
-    }
+    pomelo_platform_uv_executor_mgr_t * manager = platform->executor_mgr;
+    pomelo_platform_executor_t * executor =
+        pomelo_pool_acquire(manager->executor_pool, NULL);
+    if (!executor) return -1; // Failed to acquire executor
 
-    pomelo_threadsafe_executor_t * executor =
-        pomelo_pool_acquire(controller->executor_pool, NULL);
-    if (!executor) return NULL; // Failed to acquire executor
-
-    executor->entry = pomelo_list_push_back(controller->executors, executor);
+    executor->entry = pomelo_list_push_back(manager->executors, executor);
     if (!executor->entry) {
-        pomelo_pool_release(controller->executor_pool, executor);
-        return NULL; // Failed to add executor to list
+        pomelo_pool_release(manager->executor_pool, executor);
+        return -1; // Failed to add executor to list
     }
 
     // Startup the executor
-    int ret = pomelo_threadsafe_executor_startup(executor, controller);
+    int ret = pomelo_platform_executor_startup(executor, manager);
     if (ret < 0) {
-        pomelo_list_remove(controller->executors, executor->entry);
-        pomelo_pool_release(controller->executor_pool, executor);
-        return NULL; // Failed to startup executor
+        pomelo_list_remove(manager->executors, executor->entry);
+        pomelo_pool_release(manager->executor_pool, executor);
+        return -1; // Failed to startup executor
     }
 
-    return executor;
+    // Attach the handle
+    executor_handle->type = POMELO_PLATFORM_HANDLE_EXECUTOR;
+    executor_handle->data = executor;
+    executor->handle = executor_handle;
+
+    return 0;
 }
 
 
 /// @brief Release the threadsafe executor
-static void release_threadsafe_executor(
-    pomelo_threadsafe_executor_t * executor
-) {
+static void release_threadsafe_executor(pomelo_platform_executor_t * executor) {
     assert(executor != NULL);
-    pomelo_platform_threadsafe_controller_t * controller = executor->controller;
-    if (!pomelo_atomic_int64_load(&controller->running)) {
-        return; // Controller is not running
-    }
-    pomelo_threadsafe_executor_shutdown(executor, controller);
+    pomelo_platform_executor_shutdown(executor, executor->manager);
 }
 
 
-void pomelo_platform_uv_release_threadsafe_executor(
+void pomelo_platform_uv_release_executor(
     pomelo_platform_uv_t * platform,
-    pomelo_threadsafe_executor_t * executor
+    pomelo_platform_handle_t * executor_handle
 ) {
     assert(platform != NULL);
-    assert(executor != NULL);
-    pomelo_platform_threadsafe_controller_t * controller = executor->controller;
-    if (!pomelo_atomic_int64_load(&controller->running)) {
-        return; // Controller is not running
+    assert(executor_handle != NULL);
+
+    if (executor_handle->type != POMELO_PLATFORM_HANDLE_EXECUTOR) {
+        return; // Invalid handle type
     }
-    pomelo_threadsafe_executor_uv_submit(
+
+    pomelo_platform_executor_t * executor = executor_handle->data;
+    assert(executor != NULL);
+
+    // Detach the handle from executor
+    executor->handle = NULL;
+
+    // Use the executor to submit the its release task
+    pomelo_platform_uv_executor_submit(
         platform,
-        executor,
+        executor_handle,
         (pomelo_platform_task_entry) release_threadsafe_executor,
         executor
     );
+
+    // Detach the handle.
+    executor_handle->type = POMELO_PLATFORM_HANDLE_NONE;
+    executor_handle->data = NULL;
 }
 
 
-pomelo_platform_task_t * pomelo_threadsafe_executor_uv_submit(
+int pomelo_platform_uv_executor_submit(
     pomelo_platform_uv_t * platform,
-    pomelo_threadsafe_executor_t * executor,
+    pomelo_platform_handle_t * executor_handle,
     pomelo_platform_task_entry entry,
     void * data
 ) {
     assert(platform != NULL);
-    assert(executor != NULL);
+    assert(executor_handle != NULL);
     assert(entry != NULL);
 
-    pomelo_platform_threadsafe_controller_t * controller = executor->controller;
-    if (!pomelo_atomic_int64_load(&controller->running)) {
-        return NULL; // Controller is not running
+    if (executor_handle->type != POMELO_PLATFORM_HANDLE_EXECUTOR) {
+        return -1; // Invalid handle type
     }
 
+    pomelo_platform_executor_t * executor = executor_handle->data;
+    pomelo_platform_uv_executor_mgr_t * manager = executor->manager;
+
     if (!pomelo_atomic_int64_load(&executor->running)) {
-        return NULL; // Executor is not running
+        return -1; // Executor is not running
     }
 
     // Acquire new task
-    pomelo_platform_task_threadsafe_t * task =
-        pomelo_pool_acquire(controller->task_pool, NULL);
+    pomelo_platform_uv_task_executor_t * task =
+        pomelo_pool_acquire(manager->task_pool, NULL);
     if (!task) {
-        return NULL; // Failed to acquire new task
+        return -1; // Failed to acquire new task
     }
-    task->controller = controller;
+    task->manager = manager;
     task->entry = entry;
     task->data = data;
     
@@ -252,19 +246,19 @@ pomelo_platform_task_t * pomelo_threadsafe_executor_uv_submit(
     /* --------------------------  Critical End  ------------------------ */
 
     if (!list_entry) {
-        pomelo_platform_task_threadsafe_release(task);
-        return NULL; // Failed to append to list
+        pomelo_platform_uv_task_executor_release(task);
+        return -1; // Failed to append to list
     }
 
     // Send signal
     int ret = uv_async_send(&executor->uv_async);
     if (ret < 0) {
-        pomelo_platform_task_threadsafe_release(task);
-        return NULL; // Failed to send signal
+        pomelo_platform_uv_task_executor_release(task);
+        return -1; // Failed to send signal
     }
 
-    pomelo_atomic_uint64_fetch_add(&controller->task_counter, 1);
-    return (pomelo_platform_task_t *) task;
+    pomelo_atomic_uint64_fetch_add(&manager->task_counter, 1);
+    return 0;
 }
 
 
@@ -273,20 +267,31 @@ pomelo_platform_task_t * pomelo_threadsafe_executor_uv_submit(
 /* -------------------------------------------------------------------------- */
 
 
-void pomelo_platform_task_threadsafe_release(
-    pomelo_platform_task_threadsafe_t * task
+void pomelo_platform_uv_executor_mgr_check_closed(
+    pomelo_platform_uv_executor_mgr_t * manager
 ) {
-    assert(task != NULL);
-    pomelo_pool_release(task->controller->task_pool, task);
+    assert(manager != NULL);
+    if (manager->executors->size == 0) {
+        pomelo_platform_uv_executor_mgr_on_closed(manager);
+        return;
+    }
 }
 
 
-void pomelo_platform_task_threadsafe_async_callback(uv_async_t * async) {
+void pomelo_platform_uv_task_executor_release(
+    pomelo_platform_uv_task_executor_t * task
+) {
+    assert(task != NULL);
+    pomelo_pool_release(task->manager->task_pool, task);
+}
+
+
+void pomelo_platform_task_executor_async_callback(uv_async_t * async) {
     assert(async != NULL);
-    pomelo_threadsafe_executor_t * executor = async->data;
+    pomelo_platform_executor_t * executor = async->data;
 
     // Set the busy flag
-    executor->flags |= POMELO_EXECUTOR_FLAG_BUSY;
+    executor->flags |= POMELO_UV_EXECUTOR_FLAG_BUSY;
 
     uv_mutex_t * mutex = &executor->mutex;
     pomelo_list_t * tasks = executor->tasks_front;
@@ -302,46 +307,46 @@ void pomelo_platform_task_threadsafe_async_callback(uv_async_t * async) {
     /* ------------ End mutex scope ------------ */
 
     // Update task counter
-    pomelo_platform_threadsafe_controller_t * controller = executor->controller;
-    pomelo_atomic_uint64_fetch_sub(&controller->task_counter, tasks->size);
+    pomelo_platform_uv_executor_mgr_t * manager = executor->manager;
+    pomelo_atomic_uint64_fetch_sub(&manager->task_counter, tasks->size);
 
     // Execute tasks
-    pomelo_platform_task_threadsafe_t * task = NULL;
+    pomelo_platform_uv_task_executor_t * task = NULL;
     pomelo_platform_task_entry entry = NULL;
     void * data = NULL;
     while (
-        !(executor->flags & POMELO_EXECUTOR_FLAG_SHUTDOWN) &&
+        !(executor->flags & POMELO_UV_EXECUTOR_FLAG_SHUTDOWN) &&
         pomelo_list_pop_front(tasks, &task) == 0
     ) {
         entry = task->entry;
         data = task->data;
-        pomelo_platform_task_threadsafe_release(task);
+        pomelo_platform_uv_task_executor_release(task);
 
         entry(data);
     }
 
     // Clear the busy flag
-    executor->flags &= ~POMELO_EXECUTOR_FLAG_BUSY;
-    if (executor->flags & POMELO_EXECUTOR_FLAG_SHUTDOWN) {
-        pomelo_threadsafe_executor_shutdown(executor, executor->controller);
+    executor->flags &= ~POMELO_UV_EXECUTOR_FLAG_BUSY;
+    if (executor->flags & POMELO_UV_EXECUTOR_FLAG_SHUTDOWN) {
+        pomelo_platform_executor_shutdown(executor, executor->manager);
     }
 }
 
 
-int pomelo_threadsafe_executor_on_alloc(
-    pomelo_threadsafe_executor_t * executor,
-    pomelo_platform_threadsafe_controller_t * controller
+int pomelo_platform_executor_on_alloc(
+    pomelo_platform_executor_t * executor,
+    pomelo_platform_uv_executor_mgr_t * manager
 ) {
     assert(executor != NULL);
-    assert(controller != NULL);
+    assert(manager != NULL);
 
-    executor->controller = controller;
+    executor->manager = manager;
     pomelo_atomic_int64_store(&executor->running, false);
 
     // Create tasks lists
     pomelo_list_options_t list_options = {
-        .allocator = controller->allocator,
-        .element_size = sizeof(pomelo_platform_task_threadsafe_t *)
+        .allocator = manager->allocator,
+        .element_size = sizeof(pomelo_platform_uv_task_executor_t *)
     };
     executor->tasks_front = pomelo_list_create(&list_options);
     if (!executor->tasks_front) {
@@ -359,9 +364,7 @@ int pomelo_threadsafe_executor_on_alloc(
 }
 
 
-void pomelo_threadsafe_executor_on_free(
-    pomelo_threadsafe_executor_t * executor
-) {
+void pomelo_platform_executor_on_free(pomelo_platform_executor_t * executor) {
     assert(executor != NULL);
 
     if (executor->tasks_front) {
@@ -378,19 +381,19 @@ void pomelo_threadsafe_executor_on_free(
 }
 
 
-int pomelo_threadsafe_executor_startup(
-    pomelo_threadsafe_executor_t * executor,
-    pomelo_platform_threadsafe_controller_t * controller
+int pomelo_platform_executor_startup(
+    pomelo_platform_executor_t * executor,
+    pomelo_platform_uv_executor_mgr_t * manager
 ) {
     assert(executor != NULL);
-    (void) controller;
+    assert(manager != NULL);
 
     // Initialize async
     uv_async_t * async = &executor->uv_async;
     int ret = uv_async_init(
-        controller->uv_loop,
+        manager->uv_loop,
         async,
-        pomelo_platform_task_threadsafe_async_callback
+        pomelo_platform_task_executor_async_callback
     );
     if (ret < 0) {
         return -1;
@@ -404,33 +407,28 @@ int pomelo_threadsafe_executor_startup(
 
 /// @brief Callback for when the async handle is closed
 static void executor_shutdown_complete(uv_handle_t * handle) {
-    pomelo_threadsafe_executor_t * executor = handle->data;
-    pomelo_platform_threadsafe_controller_t * controller = executor->controller;
-    pomelo_pool_release(controller->executor_pool, executor);
+    pomelo_platform_executor_t * executor = handle->data;
+    pomelo_platform_uv_executor_mgr_t * manager = executor->manager;
+    pomelo_pool_release(manager->executor_pool, executor);
 
     assert(executor->entry != NULL);
-    pomelo_list_remove(controller->executors, executor->entry);
+    pomelo_list_remove(manager->executors, executor->entry);
     executor->entry = NULL;
 
-    if (
-        !pomelo_atomic_int64_load(&controller->running) &&
-        controller->executors->size == 0
-    ) {
-        pomelo_platform_threadsafe_controller_on_shutdown(controller);
-    }
+    pomelo_platform_uv_executor_mgr_check_closed(manager);
 }
 
 
-int pomelo_threadsafe_executor_shutdown(
-    pomelo_threadsafe_executor_t * executor,
-    pomelo_platform_threadsafe_controller_t * controller
+int pomelo_platform_executor_shutdown(
+    pomelo_platform_executor_t * executor,
+    pomelo_platform_uv_executor_mgr_t * manager
 ) {
     assert(executor != NULL);
-    assert(controller != NULL);
+    assert(manager != NULL);
 
-    if (executor->flags & POMELO_EXECUTOR_FLAG_BUSY) {
+    if (executor->flags & POMELO_UV_EXECUTOR_FLAG_BUSY) {
         // Just set the flag for later shutdown
-        executor->flags |= POMELO_EXECUTOR_FLAG_SHUTDOWN;
+        executor->flags |= POMELO_UV_EXECUTOR_FLAG_SHUTDOWN;
         return 0; // Executor is busy
     }
 
@@ -452,19 +450,19 @@ int pomelo_threadsafe_executor_shutdown(
 
     // Update task counter
     pomelo_atomic_uint64_fetch_sub(
-        &controller->task_counter,
+        &manager->task_counter,
         executor->tasks_front->size + executor->tasks_back->size
     );
 
-    pomelo_platform_task_threadsafe_t * task = NULL;
+    pomelo_platform_uv_task_executor_t * task = NULL;
     pomelo_list_t * tasks = executor->tasks_front;
     while (pomelo_list_pop_front(tasks, &task) == 0) {
-        pomelo_platform_task_threadsafe_release(task);
+        pomelo_platform_uv_task_executor_release(task);
     }
 
     tasks = executor->tasks_back;
     while (pomelo_list_pop_front(tasks, &task) == 0) {
-        pomelo_platform_task_threadsafe_release(task);
+        pomelo_platform_uv_task_executor_release(task);
     }
 
     uv_mutex_unlock(mutex);

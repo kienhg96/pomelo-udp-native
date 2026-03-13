@@ -25,12 +25,16 @@ extern "C" {
 
 
 /// @brief The sending information
-typedef struct pomelo_platform_send_s pomelo_platform_send_t;
+typedef struct pomelo_platform_uv_send_s pomelo_platform_uv_send_t;
 
 
-struct pomelo_platform_udp_s {
-    /// @brief The socket controller
-    pomelo_platform_udp_controller_t * controller;
+/// @brief The platform UDP
+typedef struct pomelo_platform_uv_udp_s pomelo_platform_uv_udp_t;
+
+
+struct pomelo_platform_uv_udp_s {
+    /// @brief The socket manager
+    pomelo_platform_uv_udp_mgr_t * manager;
 
     /// @brief The UDP handle
     uv_udp_t uv_udp;
@@ -50,6 +54,9 @@ struct pomelo_platform_udp_s {
     /// @brief Closing flag
     bool closing;
 
+    /// @brief The handle
+    pomelo_platform_handle_t * handle;
+
 #if UV_UV_CONNECT_AVAILABLE == 0
     // In the case of unavailable connect function, we need to store the target
     // address
@@ -60,7 +67,7 @@ struct pomelo_platform_udp_s {
 };
 
 
-struct pomelo_platform_udp_controller_s {
+struct pomelo_platform_uv_udp_mgr_s {
     /// @brief Platform
     pomelo_platform_uv_t * platform;
 
@@ -85,17 +92,14 @@ struct pomelo_platform_udp_controller_s {
     /// @brief Total received bytes
     uint64_t recv_bytes;
 
-    /// @brief The flag of running
-    bool running;
-
     /// @brief The number of sending requests
     size_t sending_requests;
 };
 
 
-struct pomelo_platform_send_s {
+struct pomelo_platform_uv_send_s {
     /// @brief The socket
-    pomelo_platform_udp_t * socket;
+    pomelo_platform_uv_udp_t * socket;
 
     /// @brief The uv request
     uv_udp_send_t uv_req;
@@ -112,42 +116,32 @@ struct pomelo_platform_send_s {
 /*                                Public APIs                                 */
 /* -------------------------------------------------------------------------- */
 
-/// @brief Create platform socket controller
-pomelo_platform_udp_controller_t * pomelo_platform_udp_controller_create(
+/// @brief Create platform socket manager
+pomelo_platform_uv_udp_mgr_t * pomelo_platform_uv_udp_mgr_create(
     pomelo_platform_uv_t * platform,
     pomelo_allocator_t * allocator,
     uv_loop_t * uv_loop
 );
 
 
-/// @brief Destroy platform socket controller
-void pomelo_platform_udp_controller_destroy(
-    pomelo_platform_udp_controller_t * controller
-);
+/// @brief Destroy platform socket manager
+void pomelo_platform_uv_udp_mgr_destroy(pomelo_platform_uv_udp_mgr_t * manager);
 
 
-/// @brief Get the socket controller statistic
-void pomelo_platform_udp_controller_statistic(
-    pomelo_platform_udp_controller_t * controller,
+/// @brief Get the socket manager statistic
+void pomelo_platform_uv_udp_mgr_statistic(
+    pomelo_platform_uv_udp_mgr_t * manager,
     pomelo_statistic_platform_uv_t * statistic
 );
 
 
-/// @brief Startup the UDP controller
-void pomelo_platform_udp_controller_startup(
-    pomelo_platform_udp_controller_t * controller
-);
-
-
 /// @brief Close all UDP handles
-void pomelo_platform_udp_controller_shutdown(
-    pomelo_platform_udp_controller_t * controller
-);
+void pomelo_platform_uv_udp_mgr_close(pomelo_platform_uv_udp_mgr_t * manager);
 
 
-/// @brief Callback when the UDP controller is completely shutdown
-void pomelo_platform_udp_controller_on_shutdown(
-    pomelo_platform_udp_controller_t * controller
+/// @brief Callback when the UDP manager is completely shutdown
+void pomelo_platform_uv_udp_mgr_on_closed(
+    pomelo_platform_uv_udp_mgr_t * manager
 );
 
 
@@ -156,15 +150,15 @@ void pomelo_platform_udp_controller_on_shutdown(
 /* -------------------------------------------------------------------------- */
 
 /// @brief Callback when udp socket is closed
-void pomelo_platform_udp_on_closed(uv_udp_t * udp);
+void pomelo_platform_uv_udp_on_closed(uv_udp_t * udp);
 
 
 /// @brief Close the udp socket
-void pomelo_platform_udp_close(pomelo_platform_udp_t * socket);
+void pomelo_platform_uv_udp_close(pomelo_platform_uv_udp_t * socket);
 
 
 /// @brief The allocation callback for uv
-void pomelo_platform_udp_alloc_callback(
+void pomelo_platform_uv_udp_alloc_callback(
     uv_handle_t * handle,
     size_t suggested_size,
     uv_buf_t * buf
@@ -172,7 +166,7 @@ void pomelo_platform_udp_alloc_callback(
 
 
 /// @brief The receiving callback for uv
-void pomelo_platform_udp_recv_callback(
+void pomelo_platform_uv_udp_recv_callback(
     uv_udp_t * handle,
     ssize_t nread,
     const uv_buf_t * buf,
@@ -182,12 +176,12 @@ void pomelo_platform_udp_recv_callback(
 
 
 /// @brief Sending done callback
-void pomelo_platform_send_done(uv_udp_send_t * req, int status);
+void pomelo_platform_uv_send_done(uv_udp_send_t * req, int status);
 
 
-/// @brief Check if the controller is shutdown
-void pomelo_platform_udp_controller_check_shutdown(
-    pomelo_platform_udp_controller_t * controller
+/// @brief Check if the manager is shutdown
+void pomelo_platform_uv_udp_mgr_check_closed(
+    pomelo_platform_uv_udp_mgr_t * manager
 );
 
 

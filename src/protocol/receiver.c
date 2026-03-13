@@ -47,6 +47,7 @@ int pomelo_protocol_receiver_init(
     receiver->flags = info->flags;
     receiver->crypto_ctx = peer->crypto_ctx;
     pomelo_protocol_crypto_context_ref(receiver->crypto_ctx);
+    memset(&receiver->task, 0, sizeof(receiver->task));
 
     receiver->body_view = *info->body_view;
     pomelo_buffer_ref(receiver->body_view.buffer);
@@ -152,13 +153,11 @@ static void receiver_process_entry(pomelo_protocol_receiver_t * receiver) {
 /// @brief Complete callback of receiver
 static void receiver_process_complete(
     pomelo_protocol_receiver_t * receiver,
-    bool canceled
+    uint32_t flags
 ) {
     assert(receiver != NULL);
 
-    // Unset task
-    receiver->task = NULL;
-    if (canceled) {
+    if (flags & POMELO_PLATFORM_TASK_FLAG_CANCELED) {
         receiver->flags |= POMELO_PROTOCOL_RECEIVER_FLAG_CANCELED;
     }
 
@@ -202,14 +201,15 @@ void pomelo_protocol_receiver_process(pomelo_protocol_receiver_t * receiver) {
     }
 
     // Submit process to worker
-    receiver->task = pomelo_platform_submit_worker_task(
+    int ret = pomelo_platform_submit_worker_task(
         receiver->platform,
         (pomelo_platform_task_entry) receiver_process_entry,
         (pomelo_platform_task_complete) receiver_process_complete,
-        receiver
+        receiver,
+        &receiver->task
     );
 
-    if (!receiver->task) {
+    if (ret < 0) {
         // Failed to submit to worker
         receiver->flags |= POMELO_PROTOCOL_RECEIVER_FLAG_FAILED;
         pomelo_pipeline_finish(&receiver->pipeline);
@@ -249,11 +249,8 @@ void pomelo_protocol_receiver_cancel(pomelo_protocol_receiver_t * receiver) {
     }
     receiver->flags |= POMELO_PROTOCOL_RECEIVER_FLAG_CANCELED;
 
-    // Cancel the task
-    if (receiver->task) {
-        pomelo_platform_cancel_worker_task(receiver->platform, receiver->task);
-        receiver->task = NULL;
-    }
+    // Cancel the task (if any)
+    pomelo_platform_cancel_worker_task(receiver->platform, &receiver->task);
 
     // Remove the receiver from the peer's receiving receivers list
     if (receiver->entry && receiver->peer) {

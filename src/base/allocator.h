@@ -18,11 +18,17 @@ struct pomelo_allocator_s {
     /// @brief The allocator free
     pomelo_free_callback free;
 
+    /// @brief The allocator realloc
+    pomelo_realloc_callback realloc;
+
     /// @brief Failure callback
     pomelo_alloc_failure_callback failure_callback;
 
     /// @brief Total allocated bytes
     pomelo_atomic_uint64_t allocated_bytes;
+
+    /// @brief Whether this allocator is default allocator
+    bool is_default;
 
 #ifndef NDEBUG
     /// @brief The signature of allocator
@@ -56,6 +62,10 @@ void pomelo_allocator_statistic(
     pomelo_allocator_t * allocator,
     pomelo_statistic_allocator_t * statistic
 );
+
+
+/// @brief Get the size of memory block
+size_t pomelo_allocator_sizeof(void * ptr);
 
 
 #ifdef __cplusplus

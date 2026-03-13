@@ -21,24 +21,25 @@ extern "C" {
     POMELO_PLATFORM_UV_COMPONENT_THREADSAFE   \
 )
 
+
+#define POMELO_PLATFORM_UV_FLAG_CLOSING (1 << 0)
+
+
 /// @brief Platform UV
 typedef struct pomelo_platform_uv_s pomelo_platform_uv_t;
 
-/// @brief The timer controller
-typedef struct pomelo_platform_timer_controller_s
-    pomelo_platform_timer_controller_t;
+/// @brief The timer manager
+typedef struct pomelo_platform_uv_timer_mgr_s pomelo_platform_uv_timer_mgr_t;
 
-/// @brief The udp controller
-typedef struct pomelo_platform_udp_controller_s
-    pomelo_platform_udp_controller_t;
+/// @brief The udp manager
+typedef struct pomelo_platform_uv_udp_mgr_s pomelo_platform_uv_udp_mgr_t;
 
-/// @brief The worker controller
-typedef struct pomelo_platform_worker_controller_s
-    pomelo_platform_worker_controller_t;
+/// @brief The worker manager to run tasks in worker threads
+typedef struct pomelo_platform_uv_worker_mgr_s pomelo_platform_uv_worker_mgr_t;
 
-/// @brief The threadsafe controller
-typedef struct pomelo_platform_threadsafe_controller_s
-    pomelo_platform_threadsafe_controller_t;
+/// @brief The executor manager to run tasks in platform threads
+typedef struct pomelo_platform_uv_executor_mgr_s
+    pomelo_platform_uv_executor_mgr_t;
 
 
 struct pomelo_platform_uv_s {
@@ -51,29 +52,29 @@ struct pomelo_platform_uv_s {
     /// @brief The uv loop
     uv_loop_t * uv_loop;
 
-    /// @brief The flag of running
-    bool running;
-
     /// @brief The idle handle for shutdown
-    uv_idle_t shutdown_idle;
+    uv_idle_t idle_close;
 
-    /// @brief The shutdown callback
-    pomelo_platform_shutdown_callback shutdown_callback;
+    /// @brief The flags
+    uint32_t flags;
 
-    /// @brief The bitmask of shutdown components
-    uint32_t shutdown_components;
+    /// @brief The closed callback
+    pomelo_platform_callback closed_callback;
+
+    /// @brief The bitmask of closed components
+    uint32_t closed_components;
 
     /// @brief The timer manager
-    pomelo_platform_timer_controller_t * timer_controller;
+    pomelo_platform_uv_timer_mgr_t * timer_mgr;
 
     /// @brief The socket manager
-    pomelo_platform_udp_controller_t * udp_controller;
+    pomelo_platform_uv_udp_mgr_t * udp_mgr;
 
-    /// @brief Worker controller
-    pomelo_platform_worker_controller_t * worker_controller;
+    /// @brief The worker manager to run tasks in worker threads
+    pomelo_platform_uv_worker_mgr_t * worker_mgr;
 
-    /// @brief Threadsafe controller
-    pomelo_platform_threadsafe_controller_t * threadsafe_controller;
+    /// @brief The executor manager to run tasks in platform threads
+    pomelo_platform_uv_executor_mgr_t * executor_mgr;
 };
 
 /* -------------------------------------------------------------------------- */
@@ -88,34 +89,31 @@ void pomelo_platform_uv_set_extra(pomelo_platform_uv_t * platform, void * data);
 void * pomelo_platform_uv_get_extra(pomelo_platform_uv_t * platform);
 
 
-/// @brief Startup the platform
-void pomelo_platform_uv_startup(pomelo_platform_uv_t * platform);
-
-
-/// @brief Shutdown the platform
-void pomelo_platform_uv_shutdown(
+/// @brief Close the platform
+int pomelo_platform_uv_close(
     pomelo_platform_uv_t * platform,
-    pomelo_platform_shutdown_callback callback
+    pomelo_platform_callback callback
 );
 
 
 /// @brief Acquire a threadsafe executor
-pomelo_threadsafe_executor_t * pomelo_platform_uv_acquire_threadsafe_executor(
-    pomelo_platform_uv_t * platform
+int pomelo_platform_uv_acquire_executor(
+    pomelo_platform_uv_t * platform,
+    pomelo_platform_handle_t * executor_handle
 );
 
 
 /// @brief Release a threadsafe executor
-void pomelo_platform_uv_release_threadsafe_executor(
+void pomelo_platform_uv_release_executor(
     pomelo_platform_uv_t * platform,
-    pomelo_threadsafe_executor_t * executor
+    pomelo_platform_handle_t * executor_handle
 );
 
 
 /// @brief Submit a task to threadsafe executor
-pomelo_platform_task_t * pomelo_threadsafe_executor_uv_submit(
+int pomelo_platform_uv_executor_submit(
     pomelo_platform_uv_t * platform,
-    pomelo_threadsafe_executor_t * executor,
+    pomelo_platform_handle_t * executor_handle,
     pomelo_platform_task_entry entry,
     void * data
 );
@@ -136,42 +134,44 @@ int pomelo_platform_uv_timer_start(
     uint64_t timeout_ms,
     uint64_t repeat_ms,
     void * data,
-    pomelo_platform_timer_handle_t * handle
+    pomelo_platform_handle_t * timer_handle
 );
 
 
 /// @brief Stop a timer
 void pomelo_platform_uv_timer_stop(
     pomelo_platform_uv_t * platform,
-    pomelo_platform_timer_handle_t * handle
+    pomelo_platform_handle_t * timer_handle
 );
 
 
 /// @brief Bind a UDP socket
-pomelo_platform_udp_t * pomelo_platform_uv_udp_bind(
+int pomelo_platform_uv_udp_bind(
     pomelo_platform_uv_t * platform,
-    pomelo_address_t * address
+    pomelo_address_t * address,
+    pomelo_platform_handle_t * udp_handle
 );
 
 
 /// @brief Connect a UDP socket
-pomelo_platform_udp_t * pomelo_platform_uv_udp_connect(
+int pomelo_platform_uv_udp_connect(
     pomelo_platform_uv_t * platform,
-    pomelo_address_t * address
+    pomelo_address_t * address,
+    pomelo_platform_handle_t * udp_handle
 );
 
 
 /// @brief Stop a UDP socket
-int pomelo_platform_uv_udp_stop(
+void pomelo_platform_uv_udp_stop(
     pomelo_platform_uv_t * platform,
-    pomelo_platform_udp_t * socket
+    pomelo_platform_handle_t * udp_handle
 );
 
 
 /// @brief Send data to a UDP socket
 int pomelo_platform_uv_udp_send(
     pomelo_platform_uv_t * platform,
-    pomelo_platform_udp_t * socket,
+    pomelo_platform_handle_t * udp_handle,
     pomelo_address_t * address,
     int nbuffers,
     pomelo_platform_iovec_t * buffers,
@@ -183,7 +183,7 @@ int pomelo_platform_uv_udp_send(
 /// @brief Start receiving packets from socket
 void pomelo_platform_uv_udp_recv_start(
     pomelo_platform_uv_t * platform,
-    pomelo_platform_udp_t * socket,
+    pomelo_platform_handle_t * udp_handle,
     void * context,
     pomelo_platform_alloc_cb alloc_callback,
     pomelo_platform_recv_cb recv_callback
@@ -191,18 +191,19 @@ void pomelo_platform_uv_udp_recv_start(
 
 
 /// @brief Submit a worker task
-pomelo_platform_task_t * pomelo_platform_uv_submit_worker_task(
+int pomelo_platform_uv_submit_worker_task(
     pomelo_platform_uv_t * platform,
     pomelo_platform_task_entry entry,
     pomelo_platform_task_complete complete,
-    void * data
+    void * data,
+    pomelo_platform_handle_t * task_handle
 );
 
 
 /// @brief Cancel a worker task
 void pomelo_platform_uv_cancel_worker_task(
     pomelo_platform_uv_t * platform,
-    pomelo_platform_task_t * task
+    pomelo_platform_handle_t * task_handle
 );
 
 
@@ -211,7 +212,8 @@ void pomelo_platform_uv_cancel_worker_task(
 /* -------------------------------------------------------------------------- */
 
 /// @brief Check if the platform is shutdown
-void pomelo_platform_check_shutdown(pomelo_platform_uv_t * platform);
+void pomelo_platform_uv_check_closed(pomelo_platform_uv_t * platform);
+
 
 #ifdef __cplusplus
 }

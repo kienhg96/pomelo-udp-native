@@ -11,18 +11,18 @@ extern "C" {
 
 
 /// @brief Busy flag of executor
-#define POMELO_EXECUTOR_FLAG_BUSY       (1 << 0)
+#define POMELO_UV_EXECUTOR_FLAG_BUSY       (1 << 0)
 
 /// @brief Shutdown flag of executor
-#define POMELO_EXECUTOR_FLAG_SHUTDOWN   (1 << 1)
+#define POMELO_UV_EXECUTOR_FLAG_SHUTDOWN   (1 << 1)
 
 
 /// @brief Threadsafe task
-typedef struct pomelo_platform_task_threadsafe_s
-    pomelo_platform_task_threadsafe_t;
+typedef struct pomelo_platform_uv_task_executor_s
+    pomelo_platform_uv_task_executor_t;
 
 
-struct pomelo_platform_threadsafe_controller_s {
+struct pomelo_platform_uv_executor_mgr_s {
     /// @brief Platform
     pomelo_platform_uv_t * platform;
 
@@ -38,9 +38,6 @@ struct pomelo_platform_threadsafe_controller_s {
     /// @brief Pool of executors
     pomelo_pool_t * executor_pool;
 
-    /// @brief Running flag of controller
-    pomelo_atomic_int64_t running;
-
     /// @brief Counter of tasks
     pomelo_atomic_uint64_t task_counter;
 
@@ -49,9 +46,9 @@ struct pomelo_platform_threadsafe_controller_s {
 };
 
 
-struct pomelo_threadsafe_executor_s {
-    /// @brief Controller
-    pomelo_platform_threadsafe_controller_t * controller;
+struct pomelo_platform_uv_executor_s {
+    /// @brief Manager
+    pomelo_platform_uv_executor_mgr_t * manager;
 
     /// @brief Running flag of executor
     pomelo_atomic_int64_t running;
@@ -73,12 +70,15 @@ struct pomelo_threadsafe_executor_s {
 
     /// @brief Entry of this executor
     pomelo_list_entry_t * entry;
+
+    /// @brief Handle of this executor
+    pomelo_platform_handle_t * handle;
 };
 
 
-struct pomelo_platform_task_threadsafe_s {
+struct pomelo_platform_uv_task_executor_s {
     /// @brief Controller
-    pomelo_platform_threadsafe_controller_t * controller;
+    pomelo_platform_uv_executor_mgr_t * manager;
 
     /// @brief Entry of this task
     pomelo_platform_task_entry entry;
@@ -92,42 +92,35 @@ struct pomelo_platform_task_threadsafe_s {
 /*                                Public APIs                                 */
 /* -------------------------------------------------------------------------- */
 
-/// @brief Create threadsafe controller
-pomelo_platform_threadsafe_controller_t *
-pomelo_platform_threadsafe_controller_create(
+/// @brief Create executor controller
+pomelo_platform_uv_executor_mgr_t * pomelo_platform_uv_executor_mgr_create(
     pomelo_platform_uv_t * platform,
     pomelo_allocator_t * allocator,
     uv_loop_t * uv_loop
 );
 
 
-/// @brief Destroy threadsafe controller
-void pomelo_platform_threadsafe_controller_destroy(
-    pomelo_platform_threadsafe_controller_t * controller
+/// @brief Destroy executor controller
+void pomelo_platform_uv_executor_mgr_destroy(
+    pomelo_platform_uv_executor_mgr_t * manager
 );
 
 
-/// @brief Startup the threadsafe controller
-void pomelo_platform_threadsafe_controller_startup(
-    pomelo_platform_threadsafe_controller_t * controller
+/// @brief Close the executor controller
+void pomelo_platform_uv_executor_mgr_close(
+    pomelo_platform_uv_executor_mgr_t * manager
 );
 
 
-/// @brief Shutdown the threadsafe controller
-void pomelo_platform_threadsafe_controller_shutdown(
-    pomelo_platform_threadsafe_controller_t * controller
-);
-
-
-/// @brief Callback when the threadsafe controller is completely shutdown
-void pomelo_platform_threadsafe_controller_on_shutdown(
-    pomelo_platform_threadsafe_controller_t * controller
+/// @brief Callback when the executor controller is completely closed
+void pomelo_platform_uv_executor_mgr_on_closed(
+    pomelo_platform_uv_executor_mgr_t * manager
 );
 
 
 /// @brief Get statistic information
-void pomelo_platform_threadsafe_controller_statistic(
-    pomelo_platform_threadsafe_controller_t * controller,
+void pomelo_platform_uv_executor_mgr_statistic(
+    pomelo_platform_uv_executor_mgr_t * manager,
     pomelo_statistic_platform_uv_t * statistic
 );
 
@@ -136,41 +129,44 @@ void pomelo_platform_threadsafe_controller_statistic(
 /*                               Private APIs                                 */
 /* -------------------------------------------------------------------------- */
 
+/// @brief Check close
+void pomelo_platform_uv_executor_mgr_check_closed(
+    pomelo_platform_uv_executor_mgr_t * manager
+);
 
-/// @brief Release threadsafe task
-void pomelo_platform_task_threadsafe_release(
-    pomelo_platform_task_threadsafe_t * task
+
+/// @brief Release executor task
+void pomelo_platform_uv_task_executor_release(
+    pomelo_platform_uv_task_executor_t * task
 );
 
 
 /// @brief Async callback
-void pomelo_platform_task_threadsafe_async_callback(uv_async_t * async);
+void pomelo_platform_task_executor_async_callback(uv_async_t * async);
 
 
-/// @brief Initialize the threadsafe executor
-int pomelo_threadsafe_executor_on_alloc(
-    pomelo_threadsafe_executor_t * executor,
-    pomelo_platform_threadsafe_controller_t * controller
+/// @brief Initialize the platform executor
+int pomelo_platform_executor_on_alloc(
+    pomelo_platform_executor_t * executor,
+    pomelo_platform_uv_executor_mgr_t * manager
 );
 
 
-/// @brief Finalize the threadsafe executor
-void pomelo_threadsafe_executor_on_free(
-    pomelo_threadsafe_executor_t * executor
+/// @brief Finalize the platform executor
+void pomelo_platform_executor_on_free(pomelo_platform_executor_t * executor);
+
+
+/// @brief Startup the platform executor
+int pomelo_platform_executor_startup(
+    pomelo_platform_executor_t * executor,
+    pomelo_platform_uv_executor_mgr_t * manager
 );
 
 
-/// @brief Startup the threadsafe executor
-int pomelo_threadsafe_executor_startup(
-    pomelo_threadsafe_executor_t * executor,
-    pomelo_platform_threadsafe_controller_t * controller
-);
-
-
-/// @brief Shutdown the threadsafe executor
-int pomelo_threadsafe_executor_shutdown(
-    pomelo_threadsafe_executor_t * executor,
-    pomelo_platform_threadsafe_controller_t * controller
+/// @brief Shutdown the platform executor
+int pomelo_platform_executor_shutdown(
+    pomelo_platform_executor_t * executor,
+    pomelo_platform_uv_executor_mgr_t * manager
 );
 
 

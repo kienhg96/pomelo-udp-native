@@ -280,7 +280,6 @@ int main(void) {
     };
     platform = pomelo_platform_uv_create(&platform_options);
     pomelo_check(platform != NULL);
-    pomelo_platform_startup(platform);
 
     // Create transport context
     pomelo_delivery_context_root_options_t context_options = {

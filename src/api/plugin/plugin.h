@@ -20,6 +20,9 @@ extern "C" {
 #endif
 
 
+#define POMELO_PLUGIN_FLAG_EXECUTOR_STARTED (1 << 0)
+
+
 /// @brief The plugin manager
 typedef struct pomelo_plugin_manager_s pomelo_plugin_manager_t;
 
@@ -56,10 +59,13 @@ struct pomelo_plugin_impl_s {
     pomelo_list_t * acquired_messages;
 
     /// @brief Thread-safe executor for this plugin
-    pomelo_threadsafe_executor_t * executor;
+    pomelo_platform_handle_t executor;
 
     /// @brief [Synchronized] Pool of commands for the thread-safe executor
     pomelo_pool_t * command_pool;
+
+    /// @brief The flags of this plugin
+    uint32_t flags;
 
     /* Callbacks */
     pomelo_plugin_on_unload_callback on_unload_callback;

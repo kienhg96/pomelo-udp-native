@@ -59,7 +59,7 @@ struct pomelo_protocol_sender_s {
     pomelo_protocol_crypto_context_t * codec_ctx;
 
     /// @brief The async task
-    pomelo_platform_task_t * task;
+    pomelo_platform_handle_t task;
 
     /// @brief Entry of this sender in peer senders list
     pomelo_list_entry_t * entry;

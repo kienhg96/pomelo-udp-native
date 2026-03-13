@@ -60,7 +60,7 @@ struct pomelo_delivery_sender_s {
     uint32_t flags;
 
     /// @brief The task for updating the checksum
-    pomelo_platform_task_t * checksum_update_task;
+    pomelo_platform_handle_t checksum_update_task;
 
     /// @brief The checksum of the parcel
     int checksum_compute_result;

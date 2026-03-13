@@ -90,9 +90,6 @@ int main(void) {
     platform = pomelo_test_platform_create(allocator);
     pomelo_check(platform != NULL);
 
-    // Start the platform
-    pomelo_platform_startup(platform);
-
     // Create api context
     memset(&context_options, 0, sizeof(pomelo_context_root_options_t));
     context_options.allocator = allocator;
@@ -303,10 +300,6 @@ static void check_finished(void) {
         pomelo_socket_stop(clients[i]);
     }
     pomelo_socket_stop(server);
-
-    // Shutting down the platform
-    printf("[i] Shutting down the platform\n");
-    pomelo_platform_shutdown(platform, NULL);
 }
 
 

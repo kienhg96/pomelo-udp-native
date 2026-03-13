@@ -9,12 +9,16 @@ extern "C" {
 #endif
 
 
-struct pomelo_platform_timer_s {
+/// @brief Platform UV timer
+typedef struct pomelo_platform_uv_timer_s pomelo_platform_uv_timer_t;
+
+
+struct pomelo_platform_uv_timer_s {
     /// @brief The user data
     void * data;
 
-    /// @brief The based platform
-    pomelo_platform_timer_controller_t * controller;
+    /// @brief The manager
+    pomelo_platform_uv_timer_mgr_t * manager;
 
     /// @brief The callback
     pomelo_platform_timer_entry entry;
@@ -28,15 +32,15 @@ struct pomelo_platform_timer_s {
     /// @brief The running flag
     bool is_running;
 
-    /// @brief The entry of this timer in the controlled list of the controller
+    /// @brief The entry of this timer in the controlled list of the manager
     pomelo_list_entry_t * list_entry;
 
     /// @brief The handle of this timer
-    pomelo_platform_timer_handle_t * handle;
+    pomelo_platform_handle_t * handle;
 };
 
 
-struct pomelo_platform_timer_controller_s {
+struct pomelo_platform_uv_timer_mgr_s {
     /// @brief Platform
     pomelo_platform_uv_t * platform;
 
@@ -51,9 +55,6 @@ struct pomelo_platform_timer_controller_s {
 
     /// @brief All active timers
     pomelo_list_t * timers;
-
-    /// @brief The flag of running
-    bool running;
 };
 
 
@@ -62,42 +63,36 @@ struct pomelo_platform_timer_controller_s {
 /* -------------------------------------------------------------------------- */
 
 
-/// @brief Create the timer controller
-pomelo_platform_timer_controller_t * pomelo_platform_timer_controller_create(
+/// @brief Create the timer manager
+pomelo_platform_uv_timer_mgr_t * pomelo_platform_uv_timer_mgr_create(
     pomelo_platform_uv_t * platform,
     pomelo_allocator_t * allocator,
     uv_loop_t * uv_loop
 );
 
 
-/// @brief Destroy the timer controller
-void pomelo_platform_timer_controller_destroy(
-    pomelo_platform_timer_controller_t * controller
+/// @brief Destroy the timer manager
+void pomelo_platform_uv_timer_mgr_destroy(
+    pomelo_platform_uv_timer_mgr_t * manager
 );
 
 
-/// @brief Get the statistic of timer controller
-void pomelo_platform_timer_controller_statistic(
-    pomelo_platform_timer_controller_t * controller,
+/// @brief Get the statistic of timer manager
+void pomelo_platform_uv_timer_mgr_statistic(
+    pomelo_platform_uv_timer_mgr_t * manager,
     pomelo_statistic_platform_uv_t * statistic
 );
 
 
-/// @brief Startup the timer controller
-void pomelo_platform_timer_controller_startup(
-    pomelo_platform_timer_controller_t * controller
+/// @brief Close the timer manager
+void pomelo_platform_uv_timer_mgr_close(
+    pomelo_platform_uv_timer_mgr_t * manager
 );
 
 
-/// @brief Shutdown the timer controller
-void pomelo_platform_timer_controller_shutdown(
-    pomelo_platform_timer_controller_t * controller
-);
-
-
-/// @brief Callback when the timer controller is completely shutdown
-void pomelo_platform_timer_controller_on_shutdown(
-    pomelo_platform_timer_controller_t * controller
+/// @brief Callback when the timer manager is completely closed
+void pomelo_platform_uv_timer_mgr_on_closed(
+    pomelo_platform_uv_timer_mgr_t * manager
 );
 
 
@@ -105,8 +100,15 @@ void pomelo_platform_timer_controller_on_shutdown(
 /*                               Private APIs                                 */
 /* -------------------------------------------------------------------------- */
 
+
+/// @brief Check close
+void pomelo_platform_uv_timer_mgr_check_closed(
+    pomelo_platform_uv_timer_mgr_t * manager
+);
+
+
 /// @brief Stop timer
-int pomelo_platform_uv_timer_stop_ex(pomelo_platform_timer_t * timer);
+int pomelo_platform_uv_timer_stop_ex(pomelo_platform_uv_timer_t * timer);
 
 
 /// @brief The callback from uv timer

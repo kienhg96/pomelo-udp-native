@@ -13,8 +13,8 @@
 // Common platform entities
 static pomelo_pool_t * buffer_pool = NULL;
 static pomelo_platform_t * platform = NULL;
-static pomelo_platform_timer_handle_t timer_handle;
-static pomelo_threadsafe_executor_t * executor = NULL;
+static pomelo_platform_handle_t timer;
+static pomelo_platform_handle_t executor;
 
 static int test_work_result = 0;
 static int test_work_entry_result = 0;
@@ -33,8 +33,8 @@ static bool platform_done_flag = false;
 
 
 // socket platform entities
-static pomelo_platform_udp_t * server = NULL;
-static pomelo_platform_udp_t * client = NULL;
+static pomelo_platform_handle_t server;
+static pomelo_platform_handle_t client;
 
 // Temp variables
 static void * temp_data = NULL;
@@ -52,7 +52,8 @@ static void platform_done(void) {
 
     if (platform_done_counter == 4) {
         // Then shutdown the platform job
-        pomelo_platform_shutdown(platform, platform_shutdown_callback);
+        // TODO: Check this test
+        pomelo_platform_close(platform, platform_shutdown_callback);
     }
 }
 
@@ -73,11 +74,11 @@ static void pomelo_test_work_cancel_entry(void * data) {
 }
 
 
-static void pomelo_test_work_cancel_done(void * data, bool canceled) {
+static void pomelo_test_work_cancel_done(void * data, uint32_t flags) {
     pomelo_track_function();
     (void) data;
 
-    test_work_cancel_result = (canceled == 1);
+    test_work_cancel_result = (flags & POMELO_PLATFORM_TASK_FLAG_CANCELED);
 }
 
 
@@ -88,21 +89,24 @@ static void pomelo_test_work_entry(void * data) {
 }
 
 
-static void pomelo_test_work_done(void * data, bool canceled) {
+static void pomelo_test_work_done(void * data, uint32_t flags) {
     pomelo_track_function();
     (void) data;
 
-    test_work_result = (canceled == 0);
+    test_work_result = (flags == 0);
 
     // Test cancel case
-    pomelo_platform_task_t * task = pomelo_platform_submit_worker_task(
+    pomelo_platform_handle_t handle;
+    int ret = pomelo_platform_submit_worker_task(
         platform,
         pomelo_test_work_cancel_entry,
         pomelo_test_work_cancel_done,
-        NULL
+        NULL,
+        &handle
     );
 
-    pomelo_platform_cancel_worker_task(platform, task);
+    pomelo_check(ret == 0);
+    pomelo_platform_cancel_worker_task(platform, &handle);
     platform_done();
 }
 
@@ -110,14 +114,15 @@ static int pomelo_test_platform_work(void) {
     pomelo_track_function();
 
     // Test the platform work
-    pomelo_platform_task_t * task = pomelo_platform_submit_worker_task(
+    int ret = pomelo_platform_submit_worker_task(
         platform,
         pomelo_test_work_entry,
         pomelo_test_work_done,
-        &test_work_entry_result
+        &test_work_entry_result,
+        NULL
     );
 
-    pomelo_check(task != NULL);
+    pomelo_check(ret == 0);
     return 0;
 }
 
@@ -137,7 +142,7 @@ static void pomelo_test_timer_callback(void * data) {
     test_timer_last_callback_time = time;
 
     if (*counter == 5) {
-        pomelo_platform_timer_stop(platform, &timer_handle);
+        pomelo_platform_timer_stop(platform, &timer);
         test_timer_result = 1;
 
         platform_done();
@@ -157,7 +162,7 @@ static int pomelo_test_platform_timer(void) {
         TEST_TIMER_INTERVAL, // Timeout
         TEST_TIMER_INTERVAL, // Inteval
         &test_timer_counter,
-        &timer_handle
+        &timer
     );
 
     pomelo_check(ret == 0);
@@ -166,8 +171,8 @@ static int pomelo_test_platform_timer(void) {
 
 
 static void stop_sockets(void) {
-    pomelo_platform_udp_stop(platform, server);
-    pomelo_platform_udp_stop(platform, client);
+    pomelo_platform_udp_stop(platform, &server);
+    pomelo_platform_udp_stop(platform, &client);
 
     platform_done();
 }
@@ -236,7 +241,7 @@ static void server_recv_callback(
 
     ret = pomelo_platform_udp_send(
         platform,
-        server,
+        &server,
         address,
         /* nbufs = */ 1,
         &buf,
@@ -308,16 +313,16 @@ static int pomelo_test_platform_socket(void) {
     pomelo_check(pomelo_address_from_string(&addr, addr_str) == 0);
 
     // Server starts listening on specific address
-    server = pomelo_platform_udp_bind(platform, &addr);
-    pomelo_check(server != NULL);
+    int ret = pomelo_platform_udp_bind(platform, &addr, &server);
+    pomelo_check(ret == 0);
     
     // Client starts connecting to server
-    client = pomelo_platform_udp_connect(platform, &addr);
-    pomelo_check(client != NULL);
+    ret = pomelo_platform_udp_connect(platform, &addr, &client);
+    pomelo_check(ret == 0);
 
     pomelo_platform_udp_recv_start(
         platform,
-        server,
+        &server,
         NULL,
         alloc_callback,
         server_recv_callback
@@ -325,7 +330,7 @@ static int pomelo_test_platform_socket(void) {
 
     pomelo_platform_udp_recv_start(
         platform,
-        client,
+        &client,
         NULL,
         alloc_callback,
         client_recv_callback
@@ -349,9 +354,9 @@ static int pomelo_test_platform_socket(void) {
     buf.data = payload.data;
     buf.length = payload.position;
 
-    int ret = pomelo_platform_udp_send(
+    ret = pomelo_platform_udp_send(
         platform,
-        client,
+        &client,
         /* address = */ NULL,
         /* nbufs = */ 1,
         &buf,
@@ -369,21 +374,19 @@ static void pomelo_test_platform_job_callback(void * data) {
     tesk_main_task_result = (data == temp_data);
 
     // Release the threadsafe executor
-    pomelo_platform_release_threadsafe_executor(platform, executor);
-    executor = NULL;
-
+    pomelo_platform_release_executor(platform, &executor);
     platform_done();
 }
 
 
 static int pomelo_test_platform_job(void) {
-    pomelo_platform_task_t * task = pomelo_threadsafe_executor_submit(
+    int ret = pomelo_platform_executor_submit(
         platform,
-        executor,
+        &executor,
         pomelo_test_platform_job_callback,
         temp_data
     );
-    pomelo_check(task != NULL);
+    pomelo_check(ret == 0);
     return 0;
 }
 
@@ -403,12 +406,9 @@ int pomelo_test_platform(void) {
     platform = pomelo_test_platform_create(allocator);
     pomelo_check(platform != NULL);
 
-    // Start the job controller
-    pomelo_platform_startup(platform);
-
     // Acquire the threadsafe executor
-    executor = pomelo_platform_acquire_threadsafe_executor(platform);
-    pomelo_check(executor != NULL);
+    int ret = pomelo_platform_acquire_executor(platform, &executor);
+    pomelo_check(ret == 0);
 
     // Try to get the current time
     uint64_t current = pomelo_platform_hrtime(platform);

@@ -242,26 +242,6 @@ void pomelo_context_root_destroy(pomelo_context_root_t * context) {
         context->message_pool = NULL;
     }
 
-    if (base->protocol_context) {
-        pomelo_protocol_context_destroy(base->protocol_context);
-        base->protocol_context = NULL;
-    }
-
-    if (context->delivery_context) {
-        pomelo_delivery_context_destroy(context->delivery_context);
-        context->delivery_context = NULL;
-    }
-
-    if (context->buffer_context) {
-        pomelo_buffer_context_destroy(context->buffer_context);
-        context->buffer_context = NULL;
-    }
-
-    if (context->plugin_manager) {
-        pomelo_plugin_manager_destroy(context->plugin_manager);
-        context->plugin_manager = NULL;
-    }
-
     if (base->builtin_session_pool) {
         pomelo_pool_destroy(base->builtin_session_pool);
         base->builtin_session_pool = NULL;
@@ -280,6 +260,26 @@ void pomelo_context_root_destroy(pomelo_context_root_t * context) {
     if (base->plugin_channel_pool) {
         pomelo_pool_destroy(base->plugin_channel_pool);
         base->plugin_channel_pool = NULL;
+    }
+
+    if (base->protocol_context) {
+        pomelo_protocol_context_destroy(base->protocol_context);
+        base->protocol_context = NULL;
+    }
+
+    if (context->delivery_context) {
+        pomelo_delivery_context_destroy(context->delivery_context);
+        context->delivery_context = NULL;
+    }
+
+    if (context->buffer_context) {
+        pomelo_buffer_context_destroy(context->buffer_context);
+        context->buffer_context = NULL;
+    }
+
+    if (context->plugin_manager) {
+        pomelo_plugin_manager_destroy(context->plugin_manager);
+        context->plugin_manager = NULL;
     }
 
     pomelo_allocator_free(context->allocator, context);

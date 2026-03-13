@@ -26,13 +26,22 @@ set(POMELO_GENERATOR pomelo-generator)
 set(POMELO_INCLUDE include src)
 
 # libuv
-set(LIB_UV uv_a)
-if (NOT EXISTS ${LIB_UV_INCLUDE})
-    # Use local libuv
+# First check if libuv target is already available (e.g., from parent project)
+if (TARGET uv_a)
+    message(STATUS "Using libuv from parent project")
+    set(LIB_UV uv_a)
+    get_target_property(LIB_UV_INCLUDE uv_a INTERFACE_INCLUDE_DIRECTORIES)
+elseif (TARGET uv)
+    message(STATUS "Using libuv (shared) from parent project")
+    set(LIB_UV uv)
+    get_target_property(LIB_UV_INCLUDE uv INTERFACE_INCLUDE_DIRECTORIES)
+else()
+    message(STATUS "Using bundled libuv")
+    set(LIB_UV uv_a)
     set(LIB_UV_PATH deps/libuv)
     set(LIB_UV_INCLUDE ${LIB_UV_PATH}/include)
     set(LIBUV_BUILD_SHARED OFF)
-    add_subdirectory(${LIB_UV_PATH})
+    add_subdirectory(${LIB_UV_PATH} EXCLUDE_FROM_ALL)
 endif()
 
 

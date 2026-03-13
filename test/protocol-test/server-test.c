@@ -365,7 +365,6 @@ void pomelo_protocol_socket_on_disconnected(
 
     printf("[i] Client disconnected.\n");
     pomelo_protocol_socket_stop(socket);
-    pomelo_platform_shutdown(platform, NULL);
 }
 
 
@@ -432,7 +431,6 @@ int main(void) {
     platform_options.uv_loop = &uv_loop;
     platform = pomelo_platform_uv_create(&platform_options);
     pomelo_check(platform != NULL);
-    pomelo_platform_startup(platform);
 
     // Initialize sequencer
     pomelo_sequencer_init(&sequencer);
