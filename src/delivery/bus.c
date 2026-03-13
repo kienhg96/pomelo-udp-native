@@ -521,7 +521,6 @@ void pomelo_delivery_bus_process_sending_deferred(pomelo_delivery_bus_t * bus) {
     assert(bus != NULL);
     pomelo_list_t * dispatchers = bus->pending_dispatchers;
 
-    // TODO: Implement sending reliable messages parallelly
     // Reliable sending command will block the bus
     while (
         !(bus->flags & POMELO_DELIVERY_BUS_FLAG_STOP)
