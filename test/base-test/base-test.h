@@ -9,6 +9,7 @@ int pomelo_test_address(void);
 int pomelo_test_payload(void);
 int pomelo_test_allocator(void);
 int pomelo_test_reference(void);
+int pomelo_test_reference_finalize_once(void);
 
 
 #ifdef __cplusplus

@@ -10,6 +10,9 @@ int pomelo_test_list(void);
 int pomelo_test_unrolled_list(void);
 int pomelo_test_array(void);
 int pomelo_test_map(void);
+int pomelo_test_map_rehash(void);
+int pomelo_test_map_collision(void);
+int pomelo_test_map_iterator(void);
 int pomelo_test_heap(void);
 
 

@@ -5,6 +5,8 @@
 #include "pomelo/constants.h"
 #include "crypto/crypto.h"
 #include "crypto/token.h"
+#include "crypto/checksum.h"
+#include "pomelo/base64.h"
 #include "base/payload.h"
 #include "base/constants.h"
 
@@ -269,6 +271,108 @@ static int test_token_private_rejects_tamper(void) {
 }
 
 
+static int test_checksum_blake2b(void) {
+    pomelo_track_function();
+
+    const uint8_t msg_a[] = "The quick brown fox jumps over the lazy dog";
+    const uint8_t msg_b[] = "The quick brown fox jumps over the lazy cog";
+    const size_t len_a = sizeof(msg_a) - 1; // drop NUL terminator
+    const size_t len_b = sizeof(msg_b) - 1;
+
+    // Helper: compute a digest in a single update call.
+    uint8_t digest1[POMELO_CRYPTO_CHECKSUM_BYTES];
+    pomelo_crypto_checksum_state_t s;
+    pomelo_check(pomelo_crypto_checksum_init(&s) == 0);
+    pomelo_check(pomelo_crypto_checksum_update(&s, msg_a, len_a) == 0);
+    pomelo_check(pomelo_crypto_checksum_final(&s, digest1) == 0);
+
+    // Same input must yield the same digest.
+    uint8_t digest2[POMELO_CRYPTO_CHECKSUM_BYTES];
+    pomelo_check(pomelo_crypto_checksum_init(&s) == 0);
+    pomelo_check(pomelo_crypto_checksum_update(&s, msg_a, len_a) == 0);
+    pomelo_check(pomelo_crypto_checksum_final(&s, digest2) == 0);
+    pomelo_check(
+        memcmp(digest1, digest2, POMELO_CRYPTO_CHECKSUM_BYTES) == 0
+    );
+
+    // Streaming the same input in two chunks must match the one-shot digest.
+    uint8_t digest_chunked[POMELO_CRYPTO_CHECKSUM_BYTES];
+    size_t split = len_a / 2;
+    pomelo_check(pomelo_crypto_checksum_init(&s) == 0);
+    pomelo_check(pomelo_crypto_checksum_update(&s, msg_a, split) == 0);
+    pomelo_check(
+        pomelo_crypto_checksum_update(&s, msg_a + split, len_a - split) == 0
+    );
+    pomelo_check(pomelo_crypto_checksum_final(&s, digest_chunked) == 0);
+    pomelo_check(
+        memcmp(digest1, digest_chunked, POMELO_CRYPTO_CHECKSUM_BYTES) == 0
+    );
+
+    // A one-byte difference in the input must change the digest.
+    uint8_t digest3[POMELO_CRYPTO_CHECKSUM_BYTES];
+    pomelo_check(pomelo_crypto_checksum_init(&s) == 0);
+    pomelo_check(pomelo_crypto_checksum_update(&s, msg_b, len_b) == 0);
+    pomelo_check(pomelo_crypto_checksum_final(&s, digest3) == 0);
+    pomelo_check(
+        memcmp(digest1, digest3, POMELO_CRYPTO_CHECKSUM_BYTES) != 0
+    );
+
+    return 0;
+}
+
+
+static int test_base64_roundtrip(void) {
+    pomelo_track_function();
+
+    // Cover lengths whose remainder mod 3 is 0, 1 and 2 (padding variants).
+    static const size_t lengths[] = { 1, 2, 3, 4, 5, 6, 7, 16, 32 };
+    const size_t nlengths = sizeof(lengths) / sizeof(lengths[0]);
+
+    for (size_t li = 0; li < nlengths; ++li) {
+        size_t len = lengths[li];
+
+        uint8_t bin[32];
+        for (size_t i = 0; i < len; ++i) {
+            bin[i] = (uint8_t) (i * 7 + 3);
+        }
+
+        char b64[128];
+        pomelo_check(
+            pomelo_base64_encode(b64, sizeof(b64), bin, len) == 0
+        );
+
+        // Encoded length (with padding) must match the documented formula,
+        // minus the trailing NUL that the macro accounts for.
+        size_t expected = pomelo_base64_calc_encoded_length(len);
+        pomelo_check(strlen(b64) == expected - 1);
+
+        // Padded roundtrip: decode back and compare to the original.
+        uint8_t out[32];
+        pomelo_check(
+            pomelo_base64_decode(out, sizeof(out), b64, strlen(b64)) == 0
+        );
+        pomelo_check(memcmp(out, bin, len) == 0);
+
+        // No-padding edge: strip any '=' and decode the shorter string, which
+        // drives the VARIANT_URLSAFE_NO_PADDING branch (b64_len % 4 != 0).
+        char stripped[128];
+        memcpy(stripped, b64, strlen(b64) + 1);
+        size_t slen = strlen(stripped);
+        while (slen > 0 && stripped[slen - 1] == '=') {
+            stripped[--slen] = '\0';
+        }
+
+        uint8_t out2[32];
+        pomelo_check(
+            pomelo_base64_decode(out2, sizeof(out2), stripped, slen) == 0
+        );
+        pomelo_check(memcmp(out2, bin, len) == 0);
+    }
+
+    return 0;
+}
+
+
 int main(void) {
     printf("Crypto test\n");
     pomelo_check(pomelo_crypto_init() == 0);
@@ -281,6 +385,8 @@ int main(void) {
     pomelo_run_test(test_token_private_roundtrip);
     pomelo_run_test(test_aead_rejects_tampered);
     pomelo_run_test(test_token_private_rejects_tamper);
+    pomelo_run_test(test_checksum_blake2b);
+    pomelo_run_test(test_base64_roundtrip);
 
     pomelo_random_buffer(key, sizeof(key));
     pomelo_random_buffer(ad, sizeof(ad));
