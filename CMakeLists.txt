@@ -834,6 +834,19 @@ if (POMELO_BUILD_TESTS)
         set(POMELO_SOAK_API      pomelo-soak-api)
         set(POMELO_SOAK_ENGINE   pomelo-soak-engine)
         # Target blocks are appended by later tasks.
+        add_executable(${POMELO_SOAK_DELIVERY} test/soak-test/soak-delivery.c)
+        target_include_directories(${POMELO_SOAK_DELIVERY} PRIVATE ${POMELO_TEST_INCLUDE})
+        target_link_libraries(${POMELO_SOAK_DELIVERY} PRIVATE
+            ${POMELO_BASE}
+            ${POMELO_UTILS}
+            ${POMELO_CRYPTO}
+            ${POMELO_DELIVERY}
+            ${POMELO_PLATFORM_UV}
+            ${POMELO_TEST_STATISTIC_CHECK}
+            ${LIB_UV}
+            ${LIB_SODIUM}
+        )
+        target_compile_options(${POMELO_SOAK_DELIVERY} PRIVATE ${POMELO_COMPILE_FLAGS})
     endif() # POMELO_BUILD_SOAK
 endif() # POMELO_BUILD_TESTS
 

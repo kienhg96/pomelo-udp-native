@@ -66,7 +66,9 @@ static inline void pomelo_soak_config_from_args(
     if (argc > 1 && argv[1] && *argv[1]) seconds = strtoull(argv[1], NULL, 10);
 
     if (seconds == 0) seconds = 1;
-    if (warmup >= seconds) warmup = 0;
+    /* Keep a real warmup even for short runs so the baseline is taken after the
+     * pools reach steady state (a too-early baseline causes false growth). */
+    if (warmup >= seconds) warmup = seconds / 2;
 
     soak->duration_ms = seconds * 1000;
     soak->warmup_ms   = warmup * 1000;
