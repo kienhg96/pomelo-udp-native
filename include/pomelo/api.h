@@ -531,7 +531,6 @@ int pomelo_message_write_buffer(
 
 
 int pomelo_message_write_uint8(pomelo_message_t * message, uint8_t value);
-int pomelo_message_write_uint8(pomelo_message_t * message, uint8_t value);
 int pomelo_message_write_uint16(pomelo_message_t * message, uint16_t value);
 int pomelo_message_write_uint32(pomelo_message_t * message, uint32_t value);
 int pomelo_message_write_uint64(pomelo_message_t * message, uint64_t value);
