@@ -220,10 +220,6 @@ int pomelo_platform_uv_executor_submit(
     pomelo_platform_executor_t * executor = executor_handle->data;
     pomelo_platform_uv_executor_mgr_t * manager = executor->manager;
 
-    if (!pomelo_atomic_int64_load(&executor->running)) {
-        return -1; // Executor is not running
-    }
-
     // Acquire new task
     pomelo_platform_uv_task_executor_t * task =
         pomelo_pool_acquire(manager->task_pool, NULL);
@@ -233,28 +229,34 @@ int pomelo_platform_uv_executor_submit(
     task->manager = manager;
     task->entry = entry;
     task->data = data;
-    
+
     uv_mutex_t * mutex = &executor->mutex;
+    int result = 0;
 
     /* -------------------------  Critical Begin  ----------------------- */
     uv_mutex_lock(mutex);
 
-    pomelo_list_t * tasks = executor->tasks_front;
-    pomelo_list_entry_t * list_entry = pomelo_list_push_back(tasks, task);
+    // Check running state and signal the loop under the same lock that
+    // shutdown uses, so submit never races a concurrent shutdown.
+    if (!pomelo_atomic_int64_load(&executor->running)) {
+        result = -1; // Executor stopped; must not touch the async handle
+    } else {
+        pomelo_list_entry_t * list_entry =
+            pomelo_list_push_back(executor->tasks_front, task);
+        if (!list_entry) {
+            result = -1; // Failed to append to list
+        } else if (uv_async_send(&executor->uv_async) < 0) {
+            pomelo_list_remove(executor->tasks_front, list_entry);
+            result = -1; // Failed to send signal
+        }
+    }
 
     uv_mutex_unlock(mutex);
     /* --------------------------  Critical End  ------------------------ */
 
-    if (!list_entry) {
+    if (result != 0) {
         pomelo_platform_uv_task_executor_release(task);
-        return -1; // Failed to append to list
-    }
-
-    // Send signal
-    int ret = uv_async_send(&executor->uv_async);
-    if (ret < 0) {
-        pomelo_platform_uv_task_executor_release(task);
-        return -1; // Failed to send signal
+        return -1;
     }
 
     pomelo_atomic_uint64_fetch_add(&manager->task_counter, 1);
@@ -432,21 +434,24 @@ int pomelo_platform_executor_shutdown(
         return 0; // Executor is busy
     }
 
-    if (!pomelo_atomic_int64_compare_exchange(
-        &executor->running, /* expected */ true, /* desired */ false
-    )) {
-        assert(false);
-        return -1; // Executor is not running
-    }
-
-    uv_async_t * async = &executor->uv_async;
-    uv_close((uv_handle_t *) async, executor_shutdown_complete);
-
-    // Clean all tasks
     uv_mutex_t * mutex = &executor->mutex;
 
     /* ----------- Begin mutex scope ----------- */
     uv_mutex_lock(mutex);
+
+    if (!pomelo_atomic_int64_compare_exchange(
+        &executor->running, /* expected */ true, /* desired */ false
+    )) {
+        uv_mutex_unlock(mutex);
+        assert(false);
+        return -1; // Executor is not running
+    }
+
+    // Close the async handle under the lock so a concurrent submit either
+    // observes running==true and sends before this, or observes running==false
+    // and never touches the handle.
+    uv_async_t * async = &executor->uv_async;
+    uv_close((uv_handle_t *) async, executor_shutdown_complete);
 
     // Update task counter
     pomelo_atomic_uint64_fetch_sub(
