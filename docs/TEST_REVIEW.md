@@ -146,7 +146,7 @@ Good: `api-basic-test.c` is a genuine bidirectional roundtrip with **byte verifi
 
 ## Prioritized remediation backlog
 
-> Status as of 2026-10-08: **P0, P1, P2 are DONE** (committed on `main`, local only). P3 (breadth) remains as a follow-up. The suite is now **16 CTest tests** (added `pomelo-test-protocol-server-dos` and `pomelo-test-delivery-malformed`), all green.
+> Status as of 2026-10-08: **P0, P1, P2 are DONE** and **the P3-plan batch (Tasks 15–18) is DONE** (committed on `main`, local only). A second P3 breadth batch remains as a follow-up (see below). The suite is now **17 CTest tests** (P2 added `pomelo-test-protocol-server-dos` and `pomelo-test-delivery-malformed`; P3 wired the previously-dead `pomelo-test-webrtc-plugin` in as a terminating smoke test), all green and stable across repeated runs.
 
 **P0 — test-correctness bugs (the test is wrong): ✅ DONE**
 1. ✅ `crypto-test.c:198/208` — now captures & checks the decrypt return.
@@ -165,4 +165,10 @@ Good: `api-basic-test.c` is a genuine bidirectional roundtrip with **byte verifi
 - ✅ Invalid-channel send result — out-of-range send still fires `on_send_result` with `send_count==0` (`api-basic-test.c`). Revert-proof isolated against `session.c:62`.
 - ✅ Executor cross-thread — foreign-thread submit with a distinct sentinel; cross-thread `uv_async` + submit/shutdown mutex exercised (`platform-test.c`). Deterministic, non-flaky.
 
-**P3 — coverage breadth (follow-up, not yet done):** SEQUENCED/UNRELIABLE roundtrips; replay duplicate-sequence; protocol rejection paths (bad/expired/wrong-key token, version/protocol-id mismatch, wrong-state packets); map collision/rehash; ref finalized-revival (needs NDEBUG); checksum/base64/challenge-token codec; single-fragment/out-of-order/duplicate delivery; plugin receive path (complete the session exchange); `webrtc-plugin-test` into CTest or removed; a watchdog-timeout for the integration drivers.
+**P3 — coverage breadth, batch 1 (plan Tasks 15–18): ✅ DONE**
+- ✅ SEQUENCED/UNRELIABLE API roundtrip — `api-basic-test.c` now drives one client→server send per mode on its own channel, byte-verified via a mode tag + memcmp, asserting each of `got_reliable`/`got_sequenced`/`got_unreliable` fired exactly once (was RELIABLE-only). `0a4de51`.
+- ✅ Replay duplicate-sequence — `server-test.c` delivers the same encrypted packet twice (identical header sequence); the 256-entry window (`pomelo_protocol_peer_protect_replay`) drops the duplicate, asserted by `server_received_count==1`. Non-vacuity proven: two *different*-sequence payloads with deferred teardown give count==2, so count==1 is specifically the replay drop. `0c6e875`.
+- ✅ Unit breadth — map collision/rehash (force a grow + same-bucket probe chain + iterator visit-once), ref finalize-once lifecycle (the revive-after-finalize CAS branch is NDEBUG-only — documented stub, src/ not weakened), BLAKE2b checksum (chunked-vs-oneshot invariant) + base64 encode→decode roundtrip incl. the no-padding edge. `2938133`.
+- ✅ `webrtc-plugin-test` → terminating smoke test in CTest (previously built but never `add_test`'d, and a forever-listening server that would hang). Now loads the demo plugin by path → register → listen → 50ms timer stops → clean drain, asserting RUNNING_SERVER→STOPPED + zero-leak; `assert()`→`pomelo_check`. First real coverage of the plugin-load path. `0aadde5`.
+
+**P3 — coverage breadth, batch 2 (follow-up, not yet done):** protocol rejection paths (bad/expired/wrong-key token, version/protocol-id mismatch, wrong-state packets); single-fragment/out-of-order/duplicate delivery (reorder buffer `receiver.c:283` still unexercised — in-process transport delivers in order); plugin **receive** path (complete the session exchange so the message handler actually fires); challenge-token codec; a watchdog-timeout for the integration drivers. *(ref finalized-revival remains NDEBUG-gated — noted above.)* Beyond this review entirely: sanitizer builds (ASan/UBSan/TSan — would let the defense-in-depth guards be revert-proof isolated), CI wiring, coverage measurement, and wire-parser fuzzing.

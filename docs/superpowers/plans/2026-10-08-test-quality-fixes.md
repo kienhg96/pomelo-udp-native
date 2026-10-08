@@ -503,9 +503,11 @@ git commit -m "test(platform): cross-thread executor submit with sentinel + shut
 
 ---
 
-## P2 breadth (optional within this pass; include if time permits)
+## P3 breadth — batch 1
 
-### Task 15: SEQUENCED / UNRELIABLE API roundtrip
+> **Status: ✅ ALL DONE (2026-10-08, committed local).** Task 15 `0a4de51`, Task 16 `0c6e875`, Task 18 `2938133`, Task 17 `0aadde5`. Suite 16 → 17 tests, all green. Implementation notes captured in `docs/TEST_REVIEW.md` (P3 batch 1). A P3 batch 2 (protocol rejection paths, delivery reorder/dedup, plugin receive path, challenge-token codec, integration watchdog) remains as a follow-up.
+
+### Task 15: SEQUENCED / UNRELIABLE API roundtrip — ✅ DONE (`0a4de51`)
 
 **Files:**
 - Modify: `test/api-test/api-basic-test.c` (parameterize channel mode) or add `api-modes-test.c`.
@@ -516,7 +518,7 @@ git commit -m "test(platform): cross-thread executor submit with sentinel + shut
 git commit -m "test(api): roundtrip coverage for sequenced and unreliable modes"
 ```
 
-### Task 16: Replay duplicate-sequence rejection
+### Task 16: Replay duplicate-sequence rejection — ✅ DONE (`0c6e875`)
 
 **Files:**
 - Modify: `test/protocol-test/server-test.c` or `client-test.c`.
@@ -527,7 +529,7 @@ git commit -m "test(api): roundtrip coverage for sequenced and unreliable modes"
 git commit -m "test(protocol): regression for replay-window duplicate-sequence drop"
 ```
 
-### Task 17: Wire webrtc-plugin-test into CTest or remove it
+### Task 17: Wire webrtc-plugin-test into CTest or remove it — ✅ DONE (`0aadde5`, wired as smoke test)
 
 **Files:**
 - Modify: `CMakeLists.txt` (and/or `test/webrtc-plugin-test/webrtc-plugin-test.c`).
@@ -538,7 +540,7 @@ git commit -m "test(protocol): regression for replay-window duplicate-sequence d
 git commit -m "test(webrtc): register in CTest with pomelo_check (or remove dead target)"
 ```
 
-### Task 18: Unit breadth — map collision/rehash, ref finalized-revival, checksum/base64
+### Task 18: Unit breadth — map collision/rehash, ref finalized-revival, checksum/base64 — ✅ DONE (`2938133`)
 
 **Files:**
 - Modify: `test/utils-test/map-test.c`, `test/base-test/ref-test.c`, `test/crypto-test/crypto-test.c`.
