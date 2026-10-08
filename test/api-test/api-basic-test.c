@@ -14,7 +14,33 @@
 #define API_TEST_TOKEN_EXPIRE (3600 * 1000) // 1 hour
 #define API_TEST_TOKEN_TIMEOUT -1 // 1 second
 #define API_TEST_CLIENT_ID 125
-#define API_TEST_CHANNEL 5
+
+// Task 15: per-mode channels. One channel per delivery mode so a single
+// client->server exchange exercises RELIABLE, SEQUENCED and UNRELIABLE
+// end-to-end with byte-verified payloads. Valid indices are 0..CHANNELS-1,
+// so API_TEST_CHANNELS itself remains a convenient out-of-range index for the
+// Task 13 invalid-channel regression below.
+#define CH_RELIABLE   0
+#define CH_SEQUENCED  1
+#define CH_UNRELIABLE 2
+
+#define PAYLOAD_LEN 5
+
+// Distinct, byte-identifiable payloads, one per delivery mode. The first byte
+// is a tag the receiver uses to route the message to the correct per-mode flag;
+// the whole buffer is then memcmp'd to prove the bytes arrived intact. The
+// in-process platform does not drop or reorder, so every payload is expected to
+// arrive exactly once even for UNRELIABLE.
+#define TAG_RELIABLE   0x01
+#define TAG_SEQUENCED  0x02
+#define TAG_UNRELIABLE 0x03
+
+static const uint8_t RELIABLE_PAYLOAD[PAYLOAD_LEN] =
+    { TAG_RELIABLE, 0xAA, 0xBB, 0xCC, 0xDD };
+static const uint8_t SEQUENCED_PAYLOAD[PAYLOAD_LEN] =
+    { TAG_SEQUENCED, 0x11, 0x22, 0x33, 0x44 };
+static const uint8_t UNRELIABLE_PAYLOAD[PAYLOAD_LEN] =
+    { TAG_UNRELIABLE, 0x55, 0x66, 0x77, 0x88 };
 
 
 // Environment
@@ -39,8 +65,17 @@ static pomelo_session_t * client_session;
 static bool connected_client;
 static bool connected_server;
 
-static size_t sent_counter = 0;
-static size_t recv_counter = 0;
+// Task 15: per-mode receipt flags. Each must fire exactly once (the server
+// verifies the payload bytes before incrementing). Completion waits on all
+// three plus the matching valid send results so teardown never races ahead of
+// the delivery/release of any in-flight message.
+static volatile int got_reliable = 0;
+static volatile int got_sequenced = 0;
+static volatile int got_unreliable = 0;
+
+// Number of valid (non-regression) send results observed. There are three
+// client sends (one per mode), each to a single connected session.
+static volatile int sent_valid_count = 0;
 
 static volatile int exchange_done = 0;
 
@@ -174,6 +209,13 @@ int main(void) {
     pomelo_context_destroy(context);
     pomelo_test_platform_destroy(platform);
 
+    // Task 15: every delivery mode must have delivered its payload intact,
+    // exactly once, on its own channel. Asserted after uv_run has fully drained.
+    pomelo_check(got_reliable == 1);
+    pomelo_check(got_sequenced == 1);
+    pomelo_check(got_unreliable == 1);
+    pomelo_check(sent_valid_count == 3);
+
     // Regression (Task 13): the out-of-range channel send must have delivered
     // a send-result callback, reported as a failure (zero recipients).
     pomelo_check(invalid_send_result_fired == 1);
@@ -221,18 +263,14 @@ void pomelo_client_on_received(
 ) {
     (void) session;
     (void) client;
+    (void) message;
 
     pomelo_track_function();
 
-    // Check received message
-    uint8_t value = 0;
-    int ret = pomelo_message_read_buffer(message, &value, 1);
-    pomelo_check(ret == 0);
-    pomelo_check(value == 24);
-
-    printf("[i] {Client} Received message is OK.\n");
-
-    check_finished();
+    // Task 15: the exchange is one-directional (client -> server), so the
+    // client is not expected to receive any payload. Reaching here would mean a
+    // mode echoed unexpectedly.
+    pomelo_check(0 && "client received an unexpected message");
 }
 
 
@@ -271,41 +309,63 @@ void pomelo_server_on_received(
     (void) session;
     pomelo_track_function();
 
-    // Check received message
-    uint8_t value;
-    int ret;
-
-    ret = pomelo_message_read_buffer(message, &value, 1);
+    // Task 15: byte-verify the payload and route to the matching per-mode flag.
+    // The on-wire delivery mode is carried by the transmission itself, so the
+    // receiver does not need to configure its channel mode to match the sender.
+    uint8_t buffer[PAYLOAD_LEN];
+    int ret = pomelo_message_read_buffer(message, buffer, PAYLOAD_LEN);
     pomelo_check(ret == 0);
-    pomelo_check(value == 12);
 
-    printf("[i] {Server} Received message is OK.\n");
+    switch (buffer[0]) {
+        case TAG_RELIABLE:
+            pomelo_check(memcmp(buffer, RELIABLE_PAYLOAD, PAYLOAD_LEN) == 0);
+            got_reliable++;
+            printf("[i] {Server} RELIABLE payload OK.\n");
+            break;
 
-    pomelo_message_t * reply = pomelo_context_acquire_message(context);
-    pomelo_check(reply != NULL);
+        case TAG_SEQUENCED:
+            pomelo_check(memcmp(buffer, SEQUENCED_PAYLOAD, PAYLOAD_LEN) == 0);
+            got_sequenced++;
+            printf("[i] {Server} SEQUENCED payload OK.\n");
+            break;
 
-    value = 24;
-    ret = pomelo_message_write_buffer(reply, &value, 1);
+        case TAG_UNRELIABLE:
+            pomelo_check(memcmp(buffer, UNRELIABLE_PAYLOAD, PAYLOAD_LEN) == 0);
+            got_unreliable++;
+            printf("[i] {Server} UNRELIABLE payload OK.\n");
+            break;
+
+        default:
+            pomelo_check(0 && "unexpected payload tag");
+            break;
+    }
+}
+
+
+/// @brief Send one message on `channel_index` configured to `mode`, carrying
+/// `payload`. Mirrors the acquire/write/send/unref idiom used elsewhere.
+static void send_on_channel(
+    size_t channel_index,
+    pomelo_channel_mode mode,
+    const uint8_t * payload
+) {
+    pomelo_message_t * message = pomelo_context_acquire_message(context);
+    pomelo_check(message != NULL);
+
+    int ret = pomelo_message_write_buffer(message, payload, PAYLOAD_LEN);
     pomelo_check(ret == 0);
 
     pomelo_channel_t * channel =
-        pomelo_session_get_channel(server_session, API_TEST_CHANNEL);
+        pomelo_session_get_channel(client_session, channel_index);
     pomelo_check(channel != NULL);
 
-    // Change the channel to reliable
-    ret = pomelo_channel_set_mode(channel, POMELO_CHANNEL_MODE_RELIABLE);
+    ret = pomelo_channel_set_mode(channel, mode);
     pomelo_check(ret == 0);
 
-    pomelo_session_t * sessions[] = { server_session };
-    pomelo_socket_send(
-        server,
-        API_TEST_CHANNEL,
-        reply,
-        sessions,
-        sizeof(sessions) / sizeof(sessions[0]),
-        NULL
-    );
-    pomelo_message_unref(reply);
+    pomelo_check(pomelo_channel_get_mode(channel) == mode);
+
+    pomelo_session_send(client_session, channel_index, message, NULL);
+    pomelo_message_unref(message);
 }
 
 
@@ -313,30 +373,15 @@ void pomelo_server_on_received(
 static int on_ready(void) {
     pomelo_track_function();
 
-    // Prepare a message to send from client to server
-    pomelo_message_t * message = pomelo_context_acquire_message(context);
-    pomelo_check(message != NULL);
-
-    int ret;
-    uint8_t value = 12;
-    ret = pomelo_message_write_buffer(message, &value, 1);
-    pomelo_check(ret == 0);
-
-    pomelo_channel_t * channel =
-        pomelo_session_get_channel(client_session, API_TEST_CHANNEL);
-    pomelo_check(channel != NULL);
-
-    // Change the channel to reliable
-    ret = pomelo_channel_set_mode(channel, POMELO_CHANNEL_MODE_RELIABLE);
-    pomelo_check(ret == 0);
-
-    pomelo_session_send(
-        client_session,
-        API_TEST_CHANNEL,
-        message,
-        NULL
+    // Task 15: one send per delivery mode, each on its own channel with a
+    // distinct, byte-identifiable payload.
+    send_on_channel(CH_RELIABLE, POMELO_CHANNEL_MODE_RELIABLE, RELIABLE_PAYLOAD);
+    send_on_channel(
+        CH_SEQUENCED, POMELO_CHANNEL_MODE_SEQUENCED, SEQUENCED_PAYLOAD
     );
-    pomelo_message_unref(message);
+    send_on_channel(
+        CH_UNRELIABLE, POMELO_CHANNEL_MODE_UNRELIABLE, UNRELIABLE_PAYLOAD
+    );
 
     // Regression (Task 13): send on an out-of-range channel index. Valid
     // indices are 0..API_TEST_CHANNELS-1, so API_TEST_CHANNELS is one past the
@@ -348,8 +393,8 @@ static int on_ready(void) {
         pomelo_context_acquire_message(context);
     pomelo_check(invalid_message != NULL);
 
-    value = 99;
-    ret = pomelo_message_write_buffer(invalid_message, &value, 1);
+    uint8_t value = 99;
+    int ret = pomelo_message_write_buffer(invalid_message, &value, 1);
     pomelo_check(ret == 0);
 
     pomelo_session_send(
@@ -366,11 +411,18 @@ static int on_ready(void) {
 
 static void check_finished(void) {
     printf(
-        "[i] sent_counter: %zu, recv_counter: %zu\n",
-        sent_counter,
-        recv_counter
+        "[i] got: reliable=%d sequenced=%d unreliable=%d, sent_valid=%d\n",
+        got_reliable,
+        got_sequenced,
+        got_unreliable,
+        sent_valid_count
     );
-    if (sent_counter < 2 || recv_counter < 2) return;
+
+    // Wait until all three payloads have been received AND all three valid
+    // sends have reported their result, so teardown never races in-flight
+    // delivery or message release.
+    if (!(got_reliable && got_sequenced && got_unreliable)) return;
+    if (sent_valid_count < 3) return;
 
     exchange_done = 1;
 
@@ -437,7 +489,6 @@ void pomelo_socket_on_received(
         pomelo_client_on_received(socket, session, message);
     }
 
-    recv_counter++;
     check_finished();
 }
 
@@ -490,9 +541,10 @@ void pomelo_socket_on_send_result(
         return;
     }
 
+    // Task 15: each valid per-mode send must report at least one recipient.
     pomelo_check(send_count > 0);
 
-    sent_counter += send_count;
+    sent_valid_count++;
 
     // Auto release flag is set, so we don't need to unref the message
     check_finished();
