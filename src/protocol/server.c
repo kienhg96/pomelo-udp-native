@@ -49,8 +49,8 @@ int pomelo_protocol_server_on_alloc(
 
     int ret = pomelo_protocol_socket_on_alloc(&server->socket, context);
     if (ret < 0) return ret; // Failed to initialize socket
-    
-    
+
+
     pomelo_allocator_t * allocator = context->allocator;
 
     // Create address to peer maps
@@ -139,7 +139,7 @@ int pomelo_protocol_server_init(
     assert(server != NULL);
     assert(options != NULL);
     if (!options->platform || !options->adapter) return -1;
-    
+
     // Check capability of adapter
     uint32_t flags = 0;
     uint32_t capability = pomelo_adapter_get_capability(options->adapter);
@@ -311,6 +311,16 @@ int pomelo_protocol_server_validate(
 
     // Create new anonymous peer
     if (!peer) {
+        // Bound the number of half-open (pending) handshakes. An unauthenticated
+        // REQUEST (protocol_id is public) otherwise allocates a peer and a
+        // decryption worker task before the token is validated, so a spoofed
+        // flood could exhaust memory/CPU. Only requesting_peers needs this cap:
+        // challenging_peers is only reachable with a valid (decrypted) token.
+        // Dropping is safe because clients retransmit their REQUEST.
+        if (server->requesting_peers->size >= server->max_clients) {
+            return -1; // Too many pending handshakes; drop this REQUEST
+        }
+
         peer = pomelo_protocol_server_acquire_peer(server, address);
         if (!peer) {
             return -1; // Cannot allocate new anonymous peer
@@ -382,25 +392,25 @@ void pomelo_protocol_server_recv_packet(
                 server, peer, (pomelo_protocol_packet_request_t *) packet
             );
             break;
-            
+
         case POMELO_PROTOCOL_PACKET_RESPONSE:
             pomelo_protocol_server_recv_response(
                 server, peer, (pomelo_protocol_packet_response_t *) packet
             );
             break;
-            
+
         case POMELO_PROTOCOL_PACKET_DISCONNECT:
             pomelo_protocol_server_recv_disconnect(
                 server, peer, (pomelo_protocol_packet_disconnect_t *) packet
             );
             break;
-        
+
         case POMELO_PROTOCOL_PACKET_KEEP_ALIVE:
             pomelo_protocol_server_recv_keep_alive(
                 server, peer, (pomelo_protocol_packet_keep_alive_t *) packet
             );
             break;
-            
+
         default:
             break;
     }
@@ -417,9 +427,9 @@ void pomelo_protocol_server_recv_failed(
         case POMELO_PROTOCOL_PACKET_REQUEST:
             pomelo_protocol_server_recv_request_failed(server, peer, header);
             break;
-            
+
         default:
-            break;       
+            break;
     }
 }
 
@@ -615,7 +625,7 @@ void pomelo_protocol_server_sent_packet(
         case POMELO_PROTOCOL_PACKET_DENIED:
             pomelo_protocol_server_sent_denied(server, peer);
             break;
-        
+
         default:
             break;
     }
@@ -748,7 +758,7 @@ void pomelo_protocol_server_broadcast_keep_alive(
 
     // Get the current time
     uint64_t time_ns = pomelo_platform_hrtime(socket->platform);
-    
+
     pomelo_protocol_peer_t * peer;
     pomelo_list_iterator_t it;
     pomelo_list_iterator_init(&it, peers);
@@ -798,7 +808,7 @@ int pomelo_protocol_server_send_challenge(
         &info
     );
     if (!packet) return -1; // Failed to acquire packet
-    
+
     pomelo_protocol_socket_dispatch(socket, peer, &packet->base);
     return 0;
 }
@@ -823,7 +833,7 @@ int pomelo_protocol_server_send_denied(
     if (!packet) return -1; // Failed to acquire packet
 
     pomelo_protocol_socket_dispatch(socket, peer, &packet->base);
-    
+
     // => pomelo_protocol_server_sent_denied
     return 0;
 }
@@ -989,7 +999,7 @@ int pomelo_protocol_server_disconnect_peer(
 
         // Then remove the orphan peer
         pomelo_protocol_server_release_peer(server, peer);
-        return -1; 
+        return -1;
     }
 
     peer->state = POMELO_PROTOCOL_PEER_DISCONNECTING;
@@ -1065,7 +1075,7 @@ void pomelo_protocol_server_scan_challenging_peers(
     if (challenging_peers->size == 0) {
         return; // No anonymous peers, nothing to do
     }
-    
+
     pomelo_protocol_peer_t * peer;
     pomelo_list_iterator_t it;
     uint64_t current_time_ns = pomelo_platform_hrtime(socket->platform);

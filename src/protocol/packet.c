@@ -43,7 +43,7 @@ void pomelo_protocol_packet_request_cleanup(
 
 int pomelo_protocol_packet_denied_init(
     pomelo_protocol_packet_denied_t * packet,
-    pomelo_protocol_packet_denied_info_t * info 
+    pomelo_protocol_packet_denied_info_t * info
 ) {
     assert(packet != NULL);
     packet->base.type = POMELO_PROTOCOL_PACKET_DENIED;
@@ -221,6 +221,9 @@ bool pomelo_protocol_packet_validate_body_length(
 ) {
     size_t length = body_length;
     if (encrypted && type != POMELO_PROTOCOL_PACKET_REQUEST) {
+        if (body_length < POMELO_HMAC_BYTES) {
+            return false; // Too short to contain the auth tag
+        }
         length -= POMELO_HMAC_BYTES;
     }
 
@@ -438,7 +441,7 @@ int pomelo_protocol_packet_challenge_decode(
         packet->challenge_data.encrypted,
         POMELO_CHALLENGE_TOKEN_BYTES
     );
-    
+
     // Update the view offset and length
     view->offset += payload.position;
     view->length -= payload.position;
@@ -538,7 +541,7 @@ int pomelo_protocol_packet_keep_alive_encode(
     // Write client ID
     int ret = pomelo_payload_write_int64(&payload, packet->client_id);
     if (ret < 0) return ret;
-    
+
     // Update the view length
     view->length = payload.position;
     return 0;
@@ -743,7 +746,7 @@ int pomelo_protocol_packet_decode(
     assert(packet != NULL);
     assert(crypto_ctx != NULL);
     assert(view != NULL);
-    
+
     switch (packet->type) {
         case POMELO_PROTOCOL_PACKET_REQUEST:
             return pomelo_protocol_packet_request_decode(
@@ -784,7 +787,7 @@ int pomelo_protocol_packet_encode(
     assert(packet != NULL);
     assert(context != NULL);
     assert(view != NULL);
-    
+
     switch (packet->type) {
         case POMELO_PROTOCOL_PACKET_REQUEST:
             return pomelo_protocol_packet_request_encode(
@@ -810,7 +813,7 @@ int pomelo_protocol_packet_encode(
             return pomelo_protocol_packet_payload_encode(
                 (pomelo_protocol_packet_payload_t *) packet, context, view
             );
-        
+
         default:
             return 0;
     }
