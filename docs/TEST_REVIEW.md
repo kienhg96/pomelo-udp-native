@@ -146,15 +146,23 @@ Good: `api-basic-test.c` is a genuine bidirectional roundtrip with **byte verifi
 
 ## Prioritized remediation backlog
 
-**P0 — test-correctness bugs (the test is wrong):**
-1. `crypto-test.c:198/208` — capture & check the decrypt return (currently checks stale encrypt `ret`).
-2. `delivery-test-single.c:141` — remove the duplicate `total_transmission_count +=`.
-3. `pool-test.c:73` — assert `*data2 == 2`, not `*data`.
-4. `platform-test.c:139` — fix the ns/ms timer-interval comparison (and make the bad branch set a fail flag); drop the duplicate assert at `:438`.
-5. `plugin-test.c:363` — restore the receive trigger (or delete the dead `4455` assertion) and resolve the TODOs.
+> Status as of 2026-10-08: **P0, P1, P2 are DONE** (committed on `main`, local only). P3 (breadth) remains as a follow-up. The suite is now **16 CTest tests** (added `pomelo-test-protocol-server-dos` and `pomelo-test-delivery-malformed`), all green.
 
-**P1 — close the vacuous-pass hole (T1):** add a post-`uv_run` completion/received assertion to `client-test.c`, `server-test.c`, `protocol-test.c`, `api-basic-test.c`, `api-broadcast-test.c`, `plugin-test.c` (model: `delivery-test-multiple.c:333`). Add a watchdog timeout so a stall fails instead of hangs.
+**P0 — test-correctness bugs (the test is wrong): ✅ DONE**
+1. ✅ `crypto-test.c:198/208` — now captures & checks the decrypt return.
+2. ✅ `delivery-test-single.c:141` — duplicate `total_transmission_count +=` removed.
+3. ✅ `pool-test.c:73` — asserts `*data2 == 2`.
+4. ✅ `platform-test.c` — timer interval now validated in ns (sticky-fail on bad interval); duplicate assert dropped.
+5. ✅ `plugin-test.c` — dead `4455` assertion removed, stale TODOs resolved (receive path left honestly uncovered; see P3).
 
-**P2 — regression tests for the uncovered hardening fixes (T2):** half-open peer cap, body-length underflow, delivery `last_index` cap + NULL-fragment, invalid-channel send result, executor cross-thread submit/shutdown. Plus the core crypto negative path (tamper/wrong-key fail-closed).
+**P1 — close the vacuous-pass hole (T1): ✅ DONE** — post-`uv_run` completion assertions added to `protocol-test.c` (`received_count`), `client-test.c`/`server-test.c` (`*_completed` + connect-result SUCCESS), `api-basic-test.c` (`exchange_done`), `api-broadcast-test.c` (distinct-session fan-out). The `protocol-test.c` backstop exposed a **real harness bug** (server stopped the client before the echo was delivered → client checks never ran); fixed by moving teardown into the client's receive handler after the echo is verified. *(Watchdog-timeout for a true stuck-handle hang was deferred — the completion asserts already convert a drained-but-incomplete run into a failure.)*
 
-**P3 — coverage breadth:** SEQUENCED/UNRELIABLE roundtrips; replay duplicate-sequence; protocol rejection paths; map collision/rehash; ref finalized-revival; checksum/base64/challenge-token; single-fragment/out-of-order/duplicate delivery; `webrtc-plugin-test` into CTest or removed.
+**P2 — regression tests for the uncovered hardening fixes (T2): ✅ DONE**
+- ✅ Crypto negative path — AEAD tamper (ciphertext/AAD/wrong-key) + `decode_private` wrong-key/tamper, all fail-closed (`crypto-test.c`).
+- ✅ Body-length underflow — `validate_body_length` contract across all encrypted types + truncated body through the real decode path (`packet-test.c`). *(Guard is defense-in-depth; not isolatable by revert without sanitizers.)*
+- ✅ Half-open peer cap — new `pomelo-test-protocol-server-dos`; flood 16 REQUESTs from distinct addresses vs `max_clients=4`, peak peers never exceeds the cap. **Revert-proof isolated** (peak → 16 without the guard).
+- ✅ Delivery `last_index` cap + NULL-fragment — new `pomelo-test-delivery-malformed`. **Both guards revert-proof isolated** (removing `receiver.c:281` segfaults, proving the guard prevents a real crash).
+- ✅ Invalid-channel send result — out-of-range send still fires `on_send_result` with `send_count==0` (`api-basic-test.c`). Revert-proof isolated against `session.c:62`.
+- ✅ Executor cross-thread — foreign-thread submit with a distinct sentinel; cross-thread `uv_async` + submit/shutdown mutex exercised (`platform-test.c`). Deterministic, non-flaky.
+
+**P3 — coverage breadth (follow-up, not yet done):** SEQUENCED/UNRELIABLE roundtrips; replay duplicate-sequence; protocol rejection paths (bad/expired/wrong-key token, version/protocol-id mismatch, wrong-state packets); map collision/rehash; ref finalized-revival (needs NDEBUG); checksum/base64/challenge-token codec; single-fragment/out-of-order/duplicate delivery; plugin receive path (complete the session exchange); `webrtc-plugin-test` into CTest or removed; a watchdog-timeout for the integration drivers.
