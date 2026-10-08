@@ -69,6 +69,13 @@ static uint64_t sample_v2;
 
 static volatile int server_completed = 0;
 
+// Counts how many times the app-level on_received handler fires on the server.
+// The simulator sends the echo payload once but delivers it to the server
+// TWICE (a wire-level replay with an identical header sequence number). The
+// replay protector must accept the first and drop the duplicate, so this must
+// end at exactly 1. See pomelo_protocol_peer_protect_replay (src/protocol/peer.c).
+static volatile int server_received_count = 0;
+
 
 /// @brief Encode, encrypt and dispatch the packet to client
 static void deliver_outgoing_packet(pomelo_protocol_packet_t * packet) {
@@ -252,8 +259,14 @@ static void process_payload_packet(
     packet = pomelo_pool_acquire(pool, &info);
     pomelo_check(packet != NULL);
 
-    // Reply the packet
-    deliver_outgoing_packet(&packet->base);
+    // Reply the packet to the server, then REPLAY the exact same packet a
+    // second time. Re-encoding the same packet object yields a datagram with an
+    // identical header sequence number (and identical ciphertext, since the
+    // per-packet AEAD nonce is derived from the sequence) but in its own fresh
+    // buffer. The server's 256-entry replay window must accept the first copy
+    // and silently drop the duplicate, so on_received fires exactly once.
+    deliver_outgoing_packet(&packet->base); // original delivery (accepted)
+    deliver_outgoing_packet(&packet->base); // replay, same sequence (dropped)
 
     // Then release the packet
     pomelo_pool_release(pool, packet);
@@ -358,6 +371,21 @@ void pomelo_protocol_socket_on_connected(
 }
 
 
+// Teardown is driven by a deferred timer rather than by disconnecting the peer
+// inside on_received. Disconnecting from the receive handler tears the peer down
+// before the already-queued replay datagram is validated, which would make the
+// replay drop ambiguous (peer-gone vs. replay-protection) and the assertion
+// vacuous. Arming a timer lets the sequencer fully drain first: the replayed
+// datagram is validated against the still-CONNECTED peer and dropped by
+// pomelo_protocol_peer_protect_replay, and only afterwards does this stop.
+static uv_timer_t teardown_timer;
+static void on_teardown(uv_timer_t * handle) {
+    uv_timer_stop(handle);
+    uv_close((uv_handle_t *) handle, NULL);
+    pomelo_protocol_socket_stop(server);
+}
+
+
 void pomelo_protocol_socket_on_disconnected(
     pomelo_protocol_socket_t * socket,
     pomelo_protocol_peer_t * peer
@@ -396,11 +424,19 @@ void pomelo_protocol_socket_on_received(
     pomelo_check(ret == 0);
     pomelo_check(v2 == sample_v2);
 
+    // The echo payload was delivered to the server twice (original + replay with
+    // an identical header sequence). If the 256-entry replay window works, this
+    // handler runs for the first copy only; the duplicate is dropped silently by
+    // pomelo_protocol_peer_protect_replay, so server_received_count must stay 1.
+    (void) peer; // teardown is deferred to on_teardown (see note above)
+    server_received_count++;
     server_completed = 1;
 
-    // Disconnect peer
-    printf("[i] Disconnecting peer...\n");
-    pomelo_protocol_peer_disconnect(peer);
+    if (server_received_count == 1) {
+        // Let the queued replay be processed, then tear down.
+        uv_timer_init(&uv_loop, &teardown_timer);
+        uv_timer_start(&teardown_timer, on_teardown, 100, 0);
+    }
 }
 
 
@@ -577,6 +613,9 @@ int main(void) {
 
     // Check memleak
     pomelo_check(server_completed == 1);
+    // Replay protection: the echo payload was delivered twice (original +
+    // replay with the same sequence); on_received must have fired exactly once.
+    pomelo_check(server_received_count == 1);
     pomelo_check(alloc_bytes == pomelo_allocator_allocated_bytes(allocator));
     printf("Test passed!\n");
     return 0;
