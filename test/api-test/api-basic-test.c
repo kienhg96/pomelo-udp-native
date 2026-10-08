@@ -6,6 +6,7 @@
 #include "pomelo/token.h"
 #include "platform-test/platform-test.h"
 #include "statistic-check/statistic-check.h"
+#include "platform/platform.h" // Task 22: platform timer API for the watchdog
 
 #define API_TEST_PROTOCOL_ID 50
 #define API_TEST_CHANNELS 10
@@ -79,6 +80,14 @@ static volatile int sent_valid_count = 0;
 
 static volatile int exchange_done = 0;
 
+// Task 22: watchdog. A one-shot platform timer that fires if the handshake or
+// exchange stalls, turning a hang into a hard failure instead of a CTest
+// timeout. Stopped on the normal completion path so it never fires on success
+// and is fully torn down inside the run loop.
+#define WATCHDOG_TIMEOUT_MS 5000
+static volatile int timed_out = 0;
+static pomelo_platform_handle_t watchdog_timer;
+
 // Regression (Task 13): invalid-channel send result.
 // A send on an out-of-range channel index must still dispatch a send result
 // (as a failure) instead of silently dropping the message. The send-result
@@ -96,6 +105,7 @@ static pomelo_socket_options_t socket_options;
 
 static int on_ready(void);
 static void check_finished(void);
+static void watchdog_timeout(void * data);
 
 
 /// @brief Initialize connect token & keys
@@ -194,6 +204,18 @@ int main(void) {
     ret = pomelo_socket_connect(client, connect_token);
     pomelo_check(ret == 0);
 
+    // Task 22: arm the watchdog before entering the run loop. A one-shot
+    // (non-repeating) timer; repeat_ms == 0.
+    ret = pomelo_platform_timer_start(
+        platform,
+        watchdog_timeout,
+        WATCHDOG_TIMEOUT_MS,
+        0, // one-shot
+        NULL,
+        &watchdog_timer
+    );
+    pomelo_check(ret == 0);
+
     pomelo_test_platform_run(platform);
 
     // Destroy the sockets
@@ -223,6 +245,8 @@ int main(void) {
 
     // Check memleak
     pomelo_check(exchange_done == 1);
+    // Task 22: the exchange must have completed within the watchdog window.
+    pomelo_check(timed_out == 0);
     pomelo_check(alloc_bytes == pomelo_allocator_allocated_bytes(allocator));
     return 0;
 }
@@ -426,7 +450,24 @@ static void check_finished(void) {
 
     exchange_done = 1;
 
+    // Task 22: normal completion. Cancel the watchdog so it does not fire late
+    // and so its handle is closed inside this run loop (the close callback
+    // drains before pomelo_test_platform_run returns), avoiding a leak.
+    pomelo_platform_timer_stop(platform, &watchdog_timer);
+
     printf("[i] Stopping client & server\n");
+    pomelo_socket_stop(server);
+    pomelo_socket_stop(client);
+}
+
+
+// Task 22: watchdog callback. The one-shot timer self-stops before this runs
+// (see pomelo_platform_uv_timer_callback), so we only flag the failure and stop
+// the sockets so the run loop drains and returns.
+static void watchdog_timeout(void * data) {
+    (void) data;
+    timed_out = 1;
+    printf("[!] Watchdog fired: exchange stalled, forcing teardown\n");
     pomelo_socket_stop(server);
     pomelo_socket_stop(client);
 }

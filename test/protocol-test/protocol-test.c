@@ -52,6 +52,15 @@ static uint8_t connect_token[POMELO_CONNECT_TOKEN_BYTES];
 static int connected_count;
 static volatile int received_count = 0;
 
+// Task 22: watchdog. A one-shot platform timer that fires if the handshake or
+// echo round-trip stalls, turning a hang into a hard failure instead of a CTest
+// timeout. Stopped on the normal completion path so it never fires on success
+// and is fully torn down inside the uv_run loop.
+#define WATCHDOG_TIMEOUT_MS 5000
+static volatile int timed_out = 0;
+static pomelo_platform_handle_t watchdog_timer;
+static void watchdog_timeout(void * data);
+
 static uint64_t protocol_id;
 static int64_t client_id;
 static int32_t sample_v1;
@@ -201,6 +210,18 @@ int main(void) {
     ret = pomelo_protocol_socket_start(client);
     pomelo_check(ret == 0);
 
+    // Task 22: arm the watchdog before entering the run loop. A one-shot
+    // (non-repeating) timer; repeat_ms == 0.
+    ret = pomelo_platform_timer_start(
+        platform,
+        watchdog_timeout,
+        WATCHDOG_TIMEOUT_MS,
+        0, // one-shot
+        NULL,
+        &watchdog_timer
+    );
+    pomelo_check(ret == 0);
+
     // Run
     uv_run(&uv_loop, UV_RUN_DEFAULT);
 
@@ -225,6 +246,9 @@ int main(void) {
     pomelo_buffer_context_destroy(buffer_ctx);
 
     // Check memleak
+    // Task 22: the echo round-trip must have completed within the watchdog
+    // window.
+    pomelo_check(timed_out == 0);
     pomelo_check(alloc_bytes == pomelo_allocator_allocated_bytes(allocator));
     pomelo_check(connected_count == 2);
     pomelo_check(received_count == 1);
@@ -338,12 +362,29 @@ void pomelo_protocol_socket_on_received(
         pomelo_check(v2 == sample_v2);
         received_count++;
 
+        // Task 22: normal completion. Cancel the watchdog so it does not fire
+        // late and so its handle is closed inside this uv_run loop (the close
+        // callback drains before uv_run returns), avoiding a leak.
+        pomelo_platform_timer_stop(platform, &watchdog_timer);
+
         // The echo round-trip is verified; tear down. Stopping here (after the
         // client has received the echo) avoids the premature-teardown bug where
         // the server stopped the client before the echo was delivered.
         pomelo_protocol_socket_stop(client);
         pomelo_protocol_socket_stop(server);
     }
+}
+
+
+// Task 22: watchdog callback. The one-shot timer self-stops before this runs,
+// so we only flag the failure and stop the sockets so the run loop drains and
+// returns.
+static void watchdog_timeout(void * data) {
+    (void) data;
+    timed_out = 1;
+    printf("[!] Watchdog fired: exchange stalled, forcing teardown\n");
+    pomelo_protocol_socket_stop(client);
+    pomelo_protocol_socket_stop(server);
 }
 
 
