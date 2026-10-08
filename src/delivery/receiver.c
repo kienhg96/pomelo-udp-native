@@ -58,12 +58,12 @@ int pomelo_delivery_receiver_on_alloc(
 /// @brief The on free function of the receiving command
 void pomelo_delivery_receiver_on_free(pomelo_delivery_receiver_t * receiver) {
     assert(receiver != NULL);
-    
+
     if (receiver->fragments) {
         pomelo_array_destroy(receiver->fragments);
         receiver->fragments = NULL;
     }
-    
+
     return;
 }
 
@@ -155,7 +155,7 @@ void pomelo_delivery_receiver_cleanup(pomelo_delivery_receiver_t * receiver) {
         );
         receiver->expired_entry = NULL;
     }
-    
+
     // Cleanup the sequence entry
     if (receiver->sequence_entry) {
         assert(receiver->bus != NULL);
@@ -184,7 +184,7 @@ int pomelo_delivery_receiver_check_meta(
 
     // Check the sequence of the parcel
     if (receiver->sequence != meta->sequence) return -1;
-    
+
     // Check the mode of the parcel
     if (receiver->mode != pomelo_delivery_mode_from_fragment_type(meta->type)) {
         return -1;
@@ -278,7 +278,9 @@ void pomelo_delivery_receiver_add_fragment(
     pomelo_array_t * fragments = receiver->fragments;
     pomelo_delivery_fragment_t * fragment =
         pomelo_array_get_ptr(fragments, meta->fragment_index);
-    assert(fragment != NULL);
+    if (!fragment) {
+        return; // fragment_index out of range; discard malformed fragment
+    }
     if (fragment->content.buffer) return; // Received
 
     // Attach the content to the fragment
@@ -306,7 +308,7 @@ static void verify_checksum_entry(pomelo_delivery_receiver_t * receiver) {
 
     pomelo_array_t * fragments = receiver->fragments;
     size_t nfragments = fragments->size;
-    
+
     for (size_t i = 0; i < nfragments; i++) {
         pomelo_delivery_fragment_t * fragment =
             pomelo_array_get_ptr(fragments, i);
