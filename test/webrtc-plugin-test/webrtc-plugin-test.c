@@ -1,19 +1,23 @@
-// Automated smoke test for the plugin-load path.
+// Smoke test for the shared-library plugin-load path.
 //
-// It exercises the shared-library plugin lifecycle that is otherwise untested:
-//   pomelo_plugin_load_by_path(argv[1])  -> load a plugin .so by path
-//   pomelo_plugin_register(...)          -> register it with the context
-//   pomelo_socket_listen(...)            -> start a plugin-aware server socket
-//   (short timer) pomelo_socket_stop(...) -> drain the loop and shut down cleanly
+// Two modes, selected by a flag:
+//   * default (demo plugin): load -> register -> listen -> stop -> drain ->
+//     destroy -> zero-leak assertion. A fully self-terminating, leak-checked
+//     lifecycle. CTest uses this with $<TARGET_FILE:pomelo-test-demo-plugin>.
+//   * --skip-teardown (real WebRTC plugin): load -> register -> listen ->
+//     assert RUNNING_SERVER, then _exit(0) BEFORE teardown. The real plugin's
+//     abrupt stop-without-client teardown has known bugs (tracked in the
+//     ../pomelo-udp-webrtc-plugin repo), so this mode verifies only that the
+//     real plugin loads, registers and listens against the CURRENT native ABI
+//     -- the drift guard we actually want. A full client<->server exchange is a
+//     manual procedure driven by the browser client in ../pomelo-udp-webrtc.
 //
-// CTest passes the demo plugin artifact as argv[1]
-// ($<TARGET_FILE:pomelo-test-demo-plugin>). The demo plugin only calls
-// plugin->set_data in its entry point and configures no callbacks, so this is a
-// shallow but real check that loading, registering and running a plugin-backed
-// socket leaks nothing and terminates. It deliberately does NOT drive a real
-// WebRTC transport; it just proves the plugin-load plumbing works end to end.
+// Usage: webrtc-plugin-test <plugin_path> [--skip-teardown]
 #include <inttypes.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
 #include "pomelo-test.h"
 #include "pomelo/api.h"
 #include "pomelo/constants.h"
@@ -33,18 +37,31 @@ static size_t max_clients = 100;
 static const char * address_str = "127.0.0.1:8888";
 static pomelo_context_t * context = NULL;
 
-// File-scope so the stop timer callback can reach the running server socket.
+// File-scope so the timer callback can reach the running server socket.
 static pomelo_socket_t * server = NULL;
 static uv_timer_t stop_timer;
 
+// When set (via --skip-teardown), the test exits right after confirming the
+// server is listening, before the plugin teardown path runs. See the header.
+static int skip_teardown = 0;
 
-// Deterministic teardown: once the server is listening there is no client to
-// drive the exchange, so a short timer stops the socket. Stopping drains the
-// loop (the protocol server closes its handles asynchronously) and uv_run
-// returns, which is what makes this an automated, self-terminating test rather
-// than the forever-running manual harness it used to be.
+
+// Once the server is listening there is no client to drive an exchange, so a
+// short timer ends the test. In skip-teardown mode it hard-exits after a final
+// RUNNING_SERVER check (the real plugin's abrupt teardown is buggy); otherwise
+// it stops the socket so uv_run drains and main() runs the leak-checked cleanup.
 static void on_stop_timer(uv_timer_t * handle) {
     uv_timer_stop(handle);
+    if (skip_teardown) {
+        pomelo_check(
+            pomelo_socket_get_state(server) == POMELO_SOCKET_STATE_RUNNING_SERVER
+        );
+        printf(
+            "WebRTC plugin load+listen smoke test passed (teardown skipped)\n"
+        );
+        fflush(stdout);
+        _exit(0);
+    }
     uv_close((uv_handle_t *) handle, NULL);
     pomelo_socket_stop(server);
 }
@@ -52,8 +69,17 @@ static void on_stop_timer(uv_timer_t * handle) {
 
 int main(int argc, char * argv[]) {
     if (argc < 2) {
-        printf("Not enough argument. Usage webrtc-plugin-test <plugin_path>\n");
+        printf(
+            "Not enough argument. "
+            "Usage: webrtc-plugin-test <plugin_path> [--skip-teardown]\n"
+        );
         return -1;
+    }
+
+    for (int i = 2; i < argc; i++) {
+        if (strcmp(argv[i], "--skip-teardown") == 0) {
+            skip_teardown = 1;
+        }
     }
 
     // Use default allocator
@@ -119,9 +145,10 @@ int main(int argc, char * argv[]) {
 
     printf("Server is listening on %s\n", address_str);
 
-    // Arm the stop timer, then run the loop until it drains.
+    // Arm the timer, then run the loop. In skip-teardown mode give the plugin
+    // thread a moment to bring up its WebRTC/WSS server before the re-check.
     uv_timer_init(uv_loop, &stop_timer);
-    uv_timer_start(&stop_timer, on_stop_timer, 50, 0);
+    uv_timer_start(&stop_timer, on_stop_timer, skip_teardown ? 200 : 50, 0);
 
     // Run UV loop
     uv_run(uv_loop, UV_RUN_DEFAULT);

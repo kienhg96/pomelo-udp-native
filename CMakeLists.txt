@@ -742,10 +742,44 @@ if (POMELO_BUILD_TESTS)
     add_test(NAME ${POMELO_TEST_API_BROADCAST} COMMAND ${POMELO_TEST_API_BROADCAST})
 
     add_test(NAME ${POMELO_TEST_PLUGIN} COMMAND ${POMELO_TEST_PLUGIN})
-    add_test(
-        NAME ${POMELO_TEST_WEBRTC_PLUGIN}
-        COMMAND ${POMELO_TEST_WEBRTC_PLUGIN} $<TARGET_FILE:${POMELO_TEST_DEMO_PLUGIN}>
-    )
+
+    # WebRTC plugin smoke test. Prefer the REAL plugin built from the sibling
+    # project ../pomelo-udp-webrtc-plugin so the test guards against native<->
+    # plugin ABI drift; its artifact path can be overridden with
+    # -DPOMELO_WEBRTC_PLUGIN_PATH=/path/to/libpomelo-udp-webrtc-plugin.{dylib,so}.
+    # With the real plugin the test runs in --skip-teardown mode (load + listen
+    # only): the plugin's abrupt stop-without-client teardown is buggy and tracked
+    # separately, and a full client<->server exchange needs the browser client in
+    # ../pomelo-udp-webrtc (manual). When the real artifact is not present the test
+    # falls back to the in-repo demo plugin and exercises the full, leak-checked
+    # load->listen->stop->destroy lifecycle so the suite stays portable.
+    if(NOT POMELO_WEBRTC_PLUGIN_PATH)
+        foreach(_ext dylib so)
+            set(_cand
+                "${CMAKE_CURRENT_SOURCE_DIR}/../pomelo-udp-webrtc-plugin/build/libpomelo-udp-webrtc-plugin.${_ext}")
+            if(EXISTS "${_cand}")
+                set(POMELO_WEBRTC_PLUGIN_PATH "${_cand}")
+                break()
+            endif()
+        endforeach()
+    endif()
+
+    if(POMELO_WEBRTC_PLUGIN_PATH AND EXISTS "${POMELO_WEBRTC_PLUGIN_PATH}")
+        message(STATUS
+            "WebRTC smoke test: using REAL plugin ${POMELO_WEBRTC_PLUGIN_PATH} (--skip-teardown)")
+        add_test(
+            NAME ${POMELO_TEST_WEBRTC_PLUGIN}
+            COMMAND ${POMELO_TEST_WEBRTC_PLUGIN}
+                "${POMELO_WEBRTC_PLUGIN_PATH}" --skip-teardown
+        )
+    else()
+        message(STATUS
+            "WebRTC smoke test: real plugin not found, using demo plugin fallback")
+        add_test(
+            NAME ${POMELO_TEST_WEBRTC_PLUGIN}
+            COMMAND ${POMELO_TEST_WEBRTC_PLUGIN} $<TARGET_FILE:${POMELO_TEST_DEMO_PLUGIN}>
+        )
+    endif()
 
 endif() # POMELO_BUILD_TESTS
 
