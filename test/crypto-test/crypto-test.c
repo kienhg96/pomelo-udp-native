@@ -1,7 +1,12 @@
 #include <string.h>
 #include "pomelo-test.h"
 #include "pomelo/random.h"
+#include "pomelo/address.h"
+#include "pomelo/constants.h"
 #include "crypto/crypto.h"
+#include "crypto/token.h"
+#include "base/payload.h"
+#include "base/constants.h"
 
 
 static uint64_t sequence;
@@ -15,9 +20,66 @@ static char decrypted_msg[sizeof(raw_msg)];
 static char encrypted_msg[sizeof(raw_msg) + POMELO_CRYPTO_AEAD_HMAC_BYTES];
 
 
+static int test_decode_addresses_rejects_overflow(void) {
+    pomelo_track_function();
+
+    // Craft a payload whose address count exceeds the maximum.
+    uint8_t buf[64];
+    pomelo_payload_t payload;
+    payload.data = buf;
+    payload.capacity = sizeof(buf);
+    payload.position = 0;
+    pomelo_payload_write_uint32(
+        &payload,
+        (uint32_t) (POMELO_CONNECT_TOKEN_MAX_ADDRESSES + 1)
+    );
+
+    payload.position = 0; // rewind for reading
+    int naddresses = -1;
+    pomelo_address_t addresses[POMELO_CONNECT_TOKEN_MAX_ADDRESSES];
+    int ret = pomelo_codec_decode_server_addresses(
+        &payload, &naddresses, addresses
+    );
+    pomelo_check(ret != 0); // must be rejected, not overflow
+    return 0;
+}
+
+static int test_decode_addresses_roundtrip(void) {
+    pomelo_track_function();
+
+    pomelo_connect_token_t token;
+    memset(&token, 0, sizeof(token));
+    token.naddresses = 2;
+    pomelo_check(
+        pomelo_address_from_string(&token.addresses[0], "127.0.0.1:8000") == 0
+    );
+    pomelo_check(
+        pomelo_address_from_string(&token.addresses[1], "127.0.0.1:8001") == 0
+    );
+
+    uint8_t buf[256];
+    pomelo_payload_t payload;
+    payload.data = buf;
+    payload.capacity = sizeof(buf);
+    payload.position = 0;
+    pomelo_codec_encode_server_addresses(&payload, &token);
+
+    payload.position = 0; // rewind for reading
+    int naddresses = 0;
+    pomelo_address_t out[POMELO_CONNECT_TOKEN_MAX_ADDRESSES];
+    int ret = pomelo_codec_decode_server_addresses(&payload, &naddresses, out);
+    pomelo_check(ret == 0);
+    pomelo_check(naddresses == 2);
+    return 0;
+}
+
+
 int main(void) {
     printf("Crypto test\n");
     pomelo_check(pomelo_crypto_init() == 0);
+
+    pomelo_run_test(test_decode_addresses_rejects_overflow);
+    pomelo_run_test(test_decode_addresses_roundtrip);
 
     pomelo_random_buffer(key, sizeof(key));
     pomelo_random_buffer(ad, sizeof(ad));

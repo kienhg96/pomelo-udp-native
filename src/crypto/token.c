@@ -69,14 +69,14 @@ int pomelo_connect_token_encode(
 
     // server addresses
     pomelo_codec_encode_server_addresses(&payload, token);
-    
+
     // client to server key
     pomelo_payload_write_buffer(
         &payload,
         token->client_to_server_key,
         POMELO_KEY_BYTES
     );
-    
+
     // server to client key
     pomelo_payload_write_buffer(
         &payload,
@@ -121,7 +121,7 @@ int pomelo_codec_encode_private_connect_token(
         token->client_to_server_key,
         POMELO_KEY_BYTES
     );
-    
+
     // server to client key
     pomelo_payload_write_buffer(
         &payload,
@@ -214,11 +214,13 @@ int pomelo_connect_token_decode_private(
     pomelo_payload_read_int32(&payload, &token->timeout);
 
     // server addresses
-    pomelo_codec_decode_server_addresses(
-        &payload,
-        &token->naddresses,
-        token->addresses
-    );
+    if (pomelo_codec_decode_server_addresses(
+            &payload,
+            &token->naddresses,
+            token->addresses
+        ) != 0) {
+        return -1;
+    }
 
     // client to server key
     pomelo_payload_read_buffer(
@@ -329,7 +331,7 @@ void pomelo_codec_decode_server_address(
 }
 
 
-void pomelo_codec_decode_server_addresses(
+int pomelo_codec_decode_server_addresses(
     pomelo_payload_t * payload,
     int * naddresses,
     pomelo_address_t * addresses
@@ -338,15 +340,26 @@ void pomelo_codec_decode_server_addresses(
     assert(naddresses != NULL);
     assert(addresses != NULL);
 
+    *naddresses = 0;
+
     // number of server addresses
-    uint32_t naddr;
-    pomelo_payload_read_uint32(payload, &naddr);
-    *naddresses = (int) naddr;
+    uint32_t naddr = 0;
+    if (pomelo_payload_read_uint32(payload, &naddr) != 0) {
+        return -1; // not enough data
+    }
+
+    // Reject counts outside the valid range (netcode mandates this).
+    if (naddr == 0 || naddr > POMELO_CONNECT_TOKEN_MAX_ADDRESSES) {
+        return -1;
+    }
 
     // <for each server address>
     for (uint32_t i = 0; i < naddr; ++i) {
         pomelo_codec_decode_server_address(payload, addresses + i);
     }
+
+    *naddresses = (int) naddr;
+    return 0;
 }
 
 
@@ -420,11 +433,13 @@ int pomelo_connect_token_decode_public(
     pomelo_payload_read_int32(&payload, &token->timeout);
 
     // server addresses
-    pomelo_codec_decode_server_addresses(
-        &payload,
-        &token->naddresses,
-        token->addresses
-    );
+    if (pomelo_codec_decode_server_addresses(
+            &payload,
+            &token->naddresses,
+            token->addresses
+        ) != 0) {
+        return -1;
+    }
 
     // client to server key
     pomelo_payload_read_buffer(
@@ -484,7 +499,7 @@ int pomelo_codec_encrypt_challenge_token(
         buffer,
         &encrypted_len,
         buffer,
-        POMELO_CHALLENGE_TOKEN_BYTES - 
+        POMELO_CHALLENGE_TOKEN_BYTES -
             crypto_aead_chacha20poly1305_ietf_ABYTES,
         NULL, // No associated data
         0,
