@@ -26,5 +26,4 @@ void pomelo_test_platform_destroy(pomelo_platform_t * platform) {
 void pomelo_test_platform_run(pomelo_platform_t * platform) {
     (void) platform;
     uv_run(uv_default_loop(), UV_RUN_DEFAULT);
-    uv_loop_close(uv_default_loop());
 }

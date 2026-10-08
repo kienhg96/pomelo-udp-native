@@ -37,7 +37,7 @@ pomelo_platform_t * pomelo_platform_uv_create(
         allocator = pomelo_allocator_default();
     }
 
-    pomelo_platform_uv_t * platform = 
+    pomelo_platform_uv_t * platform =
         pomelo_allocator_malloc_t(allocator, pomelo_platform_uv_t);
     if (!platform) return NULL; // Failed to allocate new platform
 
@@ -52,7 +52,7 @@ pomelo_platform_t * pomelo_platform_uv_create(
     uv_idle_init(uv_loop, &platform->idle_close);
     platform->idle_close.data = platform;
 
-    platform->worker_mgr = 
+    platform->worker_mgr =
         pomelo_platform_uv_worker_mgr_create(platform, allocator, uv_loop);
     if (!platform->worker_mgr) {
         pomelo_platform_uv_destroy((pomelo_platform_t *) platform);
@@ -75,7 +75,7 @@ pomelo_platform_t * pomelo_platform_uv_create(
         pomelo_platform_uv_destroy((pomelo_platform_t *) platform);
         return NULL;
     }
-    
+
     // Create timer manager
     platform->timer_mgr = pomelo_platform_uv_timer_mgr_create(
         platform, allocator, uv_loop
@@ -113,7 +113,7 @@ void pomelo_platform_uv_destroy(pomelo_platform_t * platform) {
         uv_platform->udp_mgr = NULL;
     }
 
-    pomelo_allocator_free(uv_platform->allocator, uv_platform);    
+    pomelo_allocator_free(uv_platform->allocator, uv_platform);
 }
 
 
@@ -141,11 +141,22 @@ uv_loop_t * pomelo_platform_uv_get_uv_loop(pomelo_platform_t * platform) {
 }
 
 
+static void idle_close_complete(uv_handle_t * handle) {
+    pomelo_platform_uv_t * platform = handle->data;
+    assert(platform != NULL);
+
+    platform->closed_components |= POMELO_PLATFORM_UV_COMPONENT_IDLE;
+    pomelo_platform_uv_check_closed(platform);
+}
+
+
 static void idle_close_cb(uv_idle_t * handle) {
     pomelo_platform_uv_t * platform = handle->data;
     assert(platform != NULL);
 
+    // Stop and close the idle handle itself so the loop can be torn down.
     uv_idle_stop(handle);
+    uv_close((uv_handle_t *) handle, idle_close_complete);
 
     pomelo_platform_uv_udp_mgr_close(platform->udp_mgr);
     pomelo_platform_uv_timer_mgr_close(platform->timer_mgr);
