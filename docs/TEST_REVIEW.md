@@ -180,3 +180,18 @@ Good: `api-basic-test.c` is a genuine bidirectional roundtrip with **byte verifi
 - ✅ Watchdog-timeout — `api-basic-test.c`, `api-broadcast-test.c`, `protocol-test.c` each arm a 5000 ms one-shot platform watchdog before the run loop; on fire it sets `timed_out=1` and stops the sockets so the loop drains, and the normal path stops the timer inside the loop (no leak). `main()` asserts `timed_out==0`. Converts a stalled run from an infinite hang into a hard failure. `d88ba65`.
 
 **P3 — remaining follow-ups (not done):** plugin **receive** path (full session exchange so the message handler fires) needs the browser client in `../pomelo-udp-webrtc` and stays **manual**; protocol *token*-level negatives (bad/expired/wrong-key connect token, wrong-state packets) beyond the synchronous `protocol_id` drop are still uncovered. *(ref finalized-revival remains NDEBUG-gated — noted above.)* Beyond this review entirely: sanitizer builds (ASan/UBSan/TSan — would let the defense-in-depth guards be revert-proof isolated), CI wiring, coverage measurement, and wire-parser fuzzing.
+
+### Soak / endurance tests (manual, not CTest): ✅ DONE
+
+Four standalone binaries behind `-DPOMELO_BUILD_SOAK=ON` (`test/soak-test/`), run manually (nightly / on-demand), each driving one layer (or the whole engine) under sustained load for an operator-chosen duration (`POMELO_SOAK_SECONDS`, default 30). The shared header-only harness `soak-common.h` samples the occupancy gauges in `pomelo_statistic_t` every 250 ms and, after a warmup, asserts a steady-state invariant: no gauge climbs past `baseline + slack` (growth guard) + forward-progress + zero-leak. See `test/soak-test/README.md`.
+
+- ✅ `pomelo-soak-delivery` — two endpoints, one parcel in flight at a time (respects main's single-dispatcher reliable model), mixed sequenced/unreliable/reliable; **lossless** (see finding below). ~77k iters/5s, all gauges flat. Soak revert-proof: leaking one parcel per result drives `parcels`/`alloc_bytes` GROWTH → FAIL. `a57df0b`.
+- ✅ `pomelo-soak-protocol` — persistent client↔server over UDP loopback, up to 4 echoed PAYLOADs in flight. ~76k iters/5s. `aa9e0d1`.
+- ✅ `pomelo-soak-api` — one server + one client session, 6 messages in flight across all three channel modes. ~83k iters/5s. `825c732`.
+- ✅ `pomelo-soak-engine` — one server + 4 concurrent persistent sessions, full-stack mixed traffic, whole `pomelo_statistic_t` watched. ~115k iters/5s. `312e60d`.
+
+**Bugs found by the soak:**
+- ✅ **Fixed** — `pomelo_list_iterator_transfer` did not sync the source iterator's `mod_count` after unlink, nor stamp the moved entry with the destination list's debug signature; continuing to iterate the source (list.c:497) or removing the moved entry (list.c:421) then aborted. Surfaced once a map outgrew its initial capacity and `pomelo_map_bucket_redistribute` called `iterator_transfer` at scale. Fixed to match the sibling paths + regression test `pomelo_test_list_transfer_integrity`. `e7a0776`.
+- ⏳ **Open (recorded, not fixed)** — with packet loss, the reliable retransmit path intermittently trips `incomplete_reliable_receiver == NULL` (`src/delivery/bus.c:416`) when a delayed retransmit races a completed reliable receiver. Pre-existing on main's single-dispatcher reliable model (being replaced by reliable-parallel on the dev branch). Hence `pomelo-soak-delivery` is lossless; a lossy/retransmit soak is deferred until that path is fixed.
+
+**Soak follow-ups (not done):** engine connection **churn** (disconnect/reconnect cycling) — engine soak ships persistent-only; **lossy/retransmit** delivery soak — blocked on the `bus.c:416` fix above.
