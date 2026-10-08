@@ -37,8 +37,12 @@ static bool platform_done_flag = false;
 static pomelo_platform_handle_t server;
 static pomelo_platform_handle_t client;
 
-// Temp variables
-static void * temp_data = NULL;
+// Executor cross-thread test: a distinct, non-NULL sentinel so the loop-thread
+// callback can prove it received exactly the pointer the foreign thread sent.
+static int executor_sentinel;
+static void * temp_data = &executor_sentinel;
+static volatile int executor_crossthread_fired = 0;
+static uv_thread_t executor_thread;
 
 
 static void platform_shutdown_callback(pomelo_platform_t * platform) {
@@ -380,6 +384,11 @@ static int pomelo_test_platform_socket(void) {
 
 static void pomelo_test_platform_job_callback(void * data) {
     pomelo_track_function();
+
+    // This runs on the loop thread; assert we got exactly the sentinel the
+    // foreign thread submitted (not a NULL==NULL tautology).
+    pomelo_check(data == &executor_sentinel);
+    executor_crossthread_fired = 1;
     tesk_main_task_result = (data == temp_data);
 
     // Release the threadsafe executor
@@ -388,12 +397,30 @@ static void pomelo_test_platform_job_callback(void * data) {
 }
 
 
-static int pomelo_test_platform_job(void) {
+// Foreign-thread entry: submits the executor job from a thread that is NOT the
+// loop thread, so the cross-thread submit (uv_async_send) and the submit-vs-
+// shutdown mutex in src/platform/uv/executor.c are genuinely exercised. The
+// async handle is already initialized (pomelo_platform_acquire_executor ran
+// before the loop started), so the submit reliably wakes the loop whenever it
+// lands; the loop keeps running until the executor callback fires, so this is
+// deterministic and does not depend on timing.
+static void pomelo_test_executor_submit_thread(void * arg) {
+    (void) arg;
     int ret = pomelo_platform_executor_submit(
         platform,
         &executor,
         pomelo_test_platform_job_callback,
         temp_data
+    );
+    pomelo_check(ret == 0);
+}
+
+
+static int pomelo_test_platform_job(void) {
+    int ret = uv_thread_create(
+        &executor_thread,
+        pomelo_test_executor_submit_thread,
+        NULL
     );
     pomelo_check(ret == 0);
     return 0;
@@ -431,6 +458,9 @@ int pomelo_test_platform(void) {
 
     pomelo_test_platform_run(platform);
 
+    // Join the foreign submit thread so it cannot outlive the test.
+    uv_thread_join(&executor_thread);
+
     // This test closes the platform (see platform_done), so once the loop has
     // drained every platform handle (including idle_close) must be closed and
     // the default loop can be torn down cleanly.
@@ -446,6 +476,7 @@ int pomelo_test_platform(void) {
     pomelo_check(test_client_result == 1);
     pomelo_check(test_server_result == 1);
     pomelo_check(tesk_main_task_result == 1);
+    pomelo_check(executor_crossthread_fired == 1);
     pomelo_check(platform_done_flag == true);
 
     // Check memleak
