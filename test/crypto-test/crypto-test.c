@@ -160,6 +160,115 @@ static int test_token_private_roundtrip(void) {
 }
 
 
+static int test_aead_rejects_tampered(void) {
+    pomelo_track_function();
+
+    uint8_t k[32], n[12], a[16];
+    pomelo_random_buffer(k, sizeof(k));
+    pomelo_random_buffer(a, sizeof(a));
+    pomelo_crypto_make_nonce(n, sizeof(n), 42);
+
+    uint8_t ct[sizeof(raw_msg) + POMELO_CRYPTO_AEAD_HMAC_BYTES];
+    size_t ct_len = 0;
+    pomelo_check(pomelo_crypto_encrypt_aead(ct, &ct_len,
+        (uint8_t *) raw_msg, sizeof(raw_msg), k, n, a, sizeof(a)) == 0);
+
+    uint8_t out[sizeof(raw_msg)];
+    size_t out_len = 0;
+
+    // 1) tampered ciphertext
+    uint8_t bad[sizeof(ct)];
+    memcpy(bad, ct, ct_len);
+    bad[0] ^= 0x01;
+    pomelo_check(pomelo_crypto_decrypt_aead(out, &out_len, bad, ct_len,
+        k, n, a, sizeof(a)) < 0);
+
+    // 2) tampered AAD
+    uint8_t bad_ad[16];
+    memcpy(bad_ad, a, sizeof(a));
+    bad_ad[0] ^= 0x01;
+    pomelo_check(pomelo_crypto_decrypt_aead(out, &out_len, ct, ct_len,
+        k, n, bad_ad, sizeof(bad_ad)) < 0);
+
+    // 3) wrong key
+    uint8_t wrong_k[32];
+    pomelo_random_buffer(wrong_k, sizeof(wrong_k));
+    pomelo_check(pomelo_crypto_decrypt_aead(out, &out_len, ct, ct_len,
+        wrong_k, n, a, sizeof(a)) < 0);
+
+    // Sanity: the un-tampered inputs must still decrypt (fail only on tamper).
+    pomelo_check(pomelo_crypto_decrypt_aead(out, &out_len, ct, ct_len,
+        k, n, a, sizeof(a)) == 0);
+    pomelo_check(out_len == sizeof(raw_msg));
+    pomelo_check(memcmp(out, raw_msg, sizeof(raw_msg)) == 0);
+    return 0;
+}
+
+
+static int test_token_private_rejects_tamper(void) {
+    pomelo_track_function();
+
+    uint8_t skey[POMELO_KEY_BYTES];
+    pomelo_random_buffer(skey, sizeof(skey));
+
+    pomelo_connect_token_t in;
+    memset(&in, 0, sizeof(in));
+    in.protocol_id = 0x1122334455667788ULL;
+    in.expire_timestamp = 9999999999ULL;
+    in.client_id = 0x00000000CAFEBABEULL;
+    in.timeout = 10;
+    in.naddresses = 1;
+    pomelo_check(
+        pomelo_address_from_string(&in.addresses[0], "127.0.0.1:9000") == 0
+    );
+    pomelo_random_buffer(in.connect_token_nonce, POMELO_CONNECT_TOKEN_NONCE_BYTES);
+    pomelo_random_buffer(in.client_to_server_key, POMELO_KEY_BYTES);
+    pomelo_random_buffer(in.server_to_client_key, POMELO_KEY_BYTES);
+    pomelo_random_buffer(in.user_data, POMELO_USER_DATA_BYTES);
+
+    uint8_t priv[POMELO_CONNECT_TOKEN_PRIVATE_BYTES];
+    pomelo_check(pomelo_codec_encode_private_connect_token(priv, &in, skey) == 0);
+
+    // AAD inputs that the decode must match.
+    pomelo_connect_token_t out;
+
+    // 1) Decode with a DIFFERENT (wrong) server key must be rejected.
+    uint8_t wrong_key[POMELO_KEY_BYTES];
+    pomelo_random_buffer(wrong_key, sizeof(wrong_key));
+    memset(&out, 0, sizeof(out));
+    out.protocol_id = in.protocol_id;
+    out.expire_timestamp = in.expire_timestamp;
+    memcpy(out.connect_token_nonce, in.connect_token_nonce,
+        POMELO_CONNECT_TOKEN_NONCE_BYTES);
+    pomelo_check(
+        pomelo_connect_token_decode_private(priv, &out, wrong_key) < 0
+    );
+
+    // 2) Decode a byte-flipped ciphertext with the correct key must be rejected.
+    uint8_t tampered[POMELO_CONNECT_TOKEN_PRIVATE_BYTES];
+    memcpy(tampered, priv, sizeof(priv));
+    tampered[0] ^= 0x01;
+    memset(&out, 0, sizeof(out));
+    out.protocol_id = in.protocol_id;
+    out.expire_timestamp = in.expire_timestamp;
+    memcpy(out.connect_token_nonce, in.connect_token_nonce,
+        POMELO_CONNECT_TOKEN_NONCE_BYTES);
+    pomelo_check(
+        pomelo_connect_token_decode_private(tampered, &out, skey) < 0
+    );
+
+    // Sanity: the un-tampered token with the correct key still decodes.
+    memset(&out, 0, sizeof(out));
+    out.protocol_id = in.protocol_id;
+    out.expire_timestamp = in.expire_timestamp;
+    memcpy(out.connect_token_nonce, in.connect_token_nonce,
+        POMELO_CONNECT_TOKEN_NONCE_BYTES);
+    pomelo_check(pomelo_connect_token_decode_private(priv, &out, skey) == 0);
+    pomelo_check(out.client_id == in.client_id);
+    return 0;
+}
+
+
 int main(void) {
     printf("Crypto test\n");
     pomelo_check(pomelo_crypto_init() == 0);
@@ -170,6 +279,8 @@ int main(void) {
     pomelo_run_test(test_random_deterministic_uses_full_seed);
     pomelo_run_test(test_random_deterministic_is_repeatable);
     pomelo_run_test(test_token_private_roundtrip);
+    pomelo_run_test(test_aead_rejects_tampered);
+    pomelo_run_test(test_token_private_rejects_tamper);
 
     pomelo_random_buffer(key, sizeof(key));
     pomelo_random_buffer(ad, sizeof(ad));
