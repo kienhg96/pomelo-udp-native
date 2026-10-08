@@ -98,7 +98,7 @@ int pomelo_delivery_bus_on_alloc(
 
 void pomelo_delivery_bus_on_free(pomelo_delivery_bus_t * bus) {
     assert(bus != NULL);
-    
+
     // Cleanup all commands
     if (bus->pending_dispatchers) {
         pomelo_list_destroy(bus->pending_dispatchers);
@@ -229,6 +229,14 @@ int pomelo_delivery_bus_recv_fragment_data(
     assert(bus != NULL);
     assert(meta != NULL);
 
+    // Reject a parcel claiming more fragments than this endpoint allows.
+    // last_index is 0-based, so the fragment count is last_index + 1; cap it
+    // against the configured maximum to prevent memory-amplification from a
+    // crafted oversized last_index.
+    if (meta->last_index >= bus->context->max_fragments) {
+        return -1; // Too many fragments; discard
+    }
+
     // Validate meta
     if (meta->type == POMELO_FRAGMENT_TYPE_DATA_RELIABLE) {
         if (bus->incomplete_reliable_receiver) {
@@ -250,7 +258,7 @@ int pomelo_delivery_bus_recv_fragment_data(
             return -1; // Out of date
         }
     }
-    
+
     // Get the receiver
     pomelo_delivery_receiver_t * receiver =
         pomelo_delivery_bus_ensure_recv_command(bus, meta);
@@ -461,7 +469,7 @@ pomelo_delivery_reception_t * pomelo_delivery_reception_init(
     assert(bus != NULL);
     assert(meta != NULL);
     assert(view_content != NULL);
-    
+
     pomelo_pool_t * pool = bus->context->reception_pool;
     pomelo_delivery_reception_t * recv = pomelo_pool_acquire(pool, NULL);
     if (!recv) return NULL; // Failed to acquire recv info
