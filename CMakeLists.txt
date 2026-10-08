@@ -880,6 +880,25 @@ if (POMELO_BUILD_TESTS)
             ${LIB_SODIUM}
         )
         target_compile_options(${POMELO_SOAK_API} PRIVATE ${POMELO_COMPILE_FLAGS})
+        add_executable(${POMELO_SOAK_ENGINE}
+            test/soak-test/soak-engine.c
+            test/platform-test/platform-uv.c
+        )
+        target_include_directories(${POMELO_SOAK_ENGINE} PRIVATE ${POMELO_TEST_INCLUDE})
+        target_link_libraries(${POMELO_SOAK_ENGINE} PRIVATE
+            ${POMELO_BASE}
+            ${POMELO_PROTOCOL}
+            ${POMELO_UTILS}
+            ${POMELO_PLATFORM_UV}
+            ${POMELO_CRYPTO}
+            ${POMELO_DELIVERY}
+            ${POMELO_API}
+            ${POMELO_ADAPTER_DEFAULT}
+            ${POMELO_TEST_STATISTIC_CHECK}
+            ${LIB_UV}
+            ${LIB_SODIUM}
+        )
+        target_compile_options(${POMELO_SOAK_ENGINE} PRIVATE ${POMELO_COMPILE_FLAGS})
     endif() # POMELO_BUILD_SOAK
 endif() # POMELO_BUILD_TESTS
 
