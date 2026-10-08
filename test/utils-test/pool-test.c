@@ -70,7 +70,7 @@ int pomelo_test_pool(void) {
 
     int * data2 = pomelo_pool_acquire(pool, NULL);
     pomelo_check(data2 != NULL);
-    pomelo_check(*data == 2);
+    pomelo_check(*data2 == 2);
 
     pomelo_pool_release(pool, data);
     pomelo_check(pool->root->available_elements != NULL);

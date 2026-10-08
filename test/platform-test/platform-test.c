@@ -136,15 +136,23 @@ static void pomelo_test_timer_callback(void * data) {
 
     uint64_t time = pomelo_platform_hrtime(platform);
     uint64_t delta = time - test_timer_last_callback_time;
-    if (delta < TEST_TIMER_INTERVAL) {
-        printf("[!] Timer test did NOT pass.\n");
+    // hrtime() is nanoseconds; TEST_TIMER_INTERVAL is milliseconds.
+    // Allow 20% slack for scheduler jitter / early wakeups.
+    uint64_t min_delta_ns =
+        (uint64_t) TEST_TIMER_INTERVAL * 1000000ULL * 8 / 10;
+    if (delta < min_delta_ns) {
+        printf("[!] Timer fired too early: %llu ns\n",
+            (unsigned long long) delta);
+        test_timer_result = -1; // sticky failure
         return;
     }
     test_timer_last_callback_time = time;
 
     if (*counter == 5) {
         pomelo_platform_timer_stop(platform, &timer);
-        test_timer_result = 1;
+        if (test_timer_result != -1) {
+            test_timer_result = 1;
+        }
 
         platform_done();
     }
@@ -434,7 +442,6 @@ int pomelo_test_platform(void) {
     pomelo_check(test_work_result == 1);
     pomelo_check(test_work_entry_result == 1);
     pomelo_check(test_work_cancel_result == 1);
-    pomelo_check(test_timer_result == 1);
     pomelo_check(test_timer_result == 1);
     pomelo_check(test_client_result == 1);
     pomelo_check(test_server_result == 1);

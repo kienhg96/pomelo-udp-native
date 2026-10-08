@@ -138,7 +138,6 @@ void pomelo_delivery_sender_on_result(
     );
 
     pomelo_delivery_parcel_unref(parcel);
-    total_transmission_count += transmission_count;
     check_finish();
 }
 

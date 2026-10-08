@@ -195,7 +195,7 @@ int main(void) {
     );
 
     printf("Decrypting message\n");
-    pomelo_crypto_decrypt_aead(
+    ret = pomelo_crypto_decrypt_aead(
         (uint8_t *) decrypted_msg,
         &output_length,
         (uint8_t *) encrypted_msg,
