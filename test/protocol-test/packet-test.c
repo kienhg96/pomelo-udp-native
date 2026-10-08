@@ -701,6 +701,80 @@ static int pomelo_test_disconnect_packet(void) {
 }
 
 
+/// @brief Regression test for the body-length underflow guard in
+/// pomelo_protocol_packet_validate_body_length (src/protocol/packet.c).
+/// An encrypted (non-REQUEST) packet body must be at least POMELO_HMAC_BYTES
+/// long to hold the AEAD auth tag; a shorter body would underflow when the tag
+/// size is subtracted before decrypt. The guard must reject it (and the real
+/// decrypt path must fail-closed instead of reading past the buffer).
+static int test_decode_rejects_short_body(void) {
+    pomelo_track_function();
+
+    // --- Part 1: exercise the guard function directly (it is the function the
+    // production decode path -- pomelo_protocol_socket_validate_incoming -- uses
+    // right after decoding the header). Every body length below the auth tag
+    // size must be rejected for an encrypted packet, for every packet type.
+    for (size_t len = 0; len < POMELO_HMAC_BYTES; len++) {
+        pomelo_check(pomelo_protocol_packet_validate_body_length(
+            POMELO_PROTOCOL_PACKET_PAYLOAD, len, true) == false);
+        pomelo_check(pomelo_protocol_packet_validate_body_length(
+            POMELO_PROTOCOL_PACKET_KEEP_ALIVE, len, true) == false);
+        pomelo_check(pomelo_protocol_packet_validate_body_length(
+            POMELO_PROTOCOL_PACKET_DISCONNECT, len, true) == false);
+        pomelo_check(pomelo_protocol_packet_validate_body_length(
+            POMELO_PROTOCOL_PACKET_DENIED, len, true) == false);
+    }
+
+    // A tag-only body (exactly POMELO_HMAC_BYTES) is the smallest a zero-length
+    // body type accepts: proves the rejection boundary sits at the tag size.
+    pomelo_check(pomelo_protocol_packet_validate_body_length(
+        POMELO_PROTOCOL_PACKET_DISCONNECT, POMELO_HMAC_BYTES, true) == true);
+
+    // --- Part 2: drive a truncated encrypted body through the REAL decrypt +
+    // decode path and confirm it fails (< 0) without crashing / reading OOB.
+    pomelo_buffer_t * buffer = pomelo_buffer_context_acquire(buffer_ctx);
+    pomelo_check(buffer != NULL);
+
+    pomelo_buffer_view_t view;
+    view.buffer = buffer;
+    view.length = 0;
+    view.offset = 0;
+
+    // Build & encrypt a valid DISCONNECT so there is a real header on the wire.
+    uint64_t sequence = random_u64();
+    pomelo_protocol_packet_denied_info_t info = { .sequence = sequence };
+    pomelo_protocol_packet_denied_t * packet = pomelo_pool_acquire(
+        protocol_ctx->packet_pools[POMELO_PROTOCOL_PACKET_DISCONNECT],
+        &info
+    );
+    pomelo_check(packet != NULL);
+    pomelo_check(encode_and_encrypt_packet(&packet->base, &view) == 0);
+    pomelo_protocol_context_release_packet(protocol_ctx, &packet->base);
+
+    // Decode the header off the wire.
+    pomelo_protocol_packet_header_t header = { 0 };
+    pomelo_check(pomelo_protocol_packet_header_decode(&header, &view) == 0);
+    pomelo_check(header.type == POMELO_PROTOCOL_PACKET_DISCONNECT);
+
+    // Truncate the body below POMELO_HMAC_BYTES to simulate a malicious /
+    // corrupted short packet, then run the real decode path.
+    view.length = 4; // < POMELO_HMAC_BYTES
+
+    packet = pomelo_pool_acquire(
+        protocol_ctx->packet_pools[POMELO_PROTOCOL_PACKET_DISCONNECT],
+        NULL
+    );
+    pomelo_check(packet != NULL);
+
+    int ret = decrypt_and_decode_packet(&packet->base, &view, &header);
+    pomelo_check(ret < 0); // rejected: no underflow, no out-of-bounds read
+
+    pomelo_protocol_context_release_packet(protocol_ctx, &packet->base);
+    pomelo_buffer_unref(buffer);
+    return 0;
+}
+
+
 int main(void) {
     printf("Packet test\n");
     pomelo_check(pomelo_crypto_init() == 0);
@@ -760,6 +834,7 @@ int main(void) {
     pomelo_check(pomelo_test_payload_packet() == 0);
     pomelo_check(pomelo_test_disconnect_packet() == 0);
     pomelo_check(pomelo_test_denied_packet() == 0);
+    pomelo_check(test_decode_rejects_short_body() == 0);
 
     // Release resources
     pomelo_protocol_context_release_crypto_context(protocol_ctx, crypto_ctx);
