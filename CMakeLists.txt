@@ -354,6 +354,7 @@ if (POMELO_BUILD_TESTS)
     set(POMELO_TEST_PROTOCOL_SERVER_DOS pomelo-test-protocol-server-dos)
     set(POMELO_TEST_PROTOCOL_PACKET pomelo-test-protocol-packet)
     set(POMELO_TEST_DELIVERY_SINGLE pomelo-test-delivery-single)
+    set(POMELO_TEST_DELIVERY_MALFORMED pomelo-test-delivery-malformed)
     set(POMELO_TEST_DELIVERY_MULTIPLE pomelo-test-delivery-multiple)
     set(POMELO_TEST_API_BASIC pomelo-test-api-basic)
     set(POMELO_TEST_API_BROADCAST pomelo-test-api-broadcast)
@@ -589,6 +590,23 @@ if (POMELO_BUILD_TESTS)
     target_compile_options(${POMELO_TEST_DELIVERY_SINGLE} PRIVATE ${POMELO_COMPILE_FLAGS})
 
 
+    # Test delivery: Malformed fragment guards
+    set(SRC_TEST_DELIVERY_MALFORMED test/delivery-test/delivery-malformed-test.c)
+    add_executable(${POMELO_TEST_DELIVERY_MALFORMED} ${SRC_TEST_DELIVERY_MALFORMED})
+    target_include_directories(${POMELO_TEST_DELIVERY_MALFORMED} PRIVATE ${POMELO_TEST_INCLUDE})
+    target_link_libraries(${POMELO_TEST_DELIVERY_MALFORMED} PRIVATE
+        ${POMELO_BASE}
+        ${POMELO_UTILS}
+        ${POMELO_CRYPTO}
+        ${POMELO_DELIVERY}
+        ${POMELO_PLATFORM_UV}
+        ${POMELO_TEST_STATISTIC_CHECK}
+        ${LIB_UV}
+        ${LIB_SODIUM}
+    )
+    target_compile_options(${POMELO_TEST_DELIVERY_MALFORMED} PRIVATE ${POMELO_COMPILE_FLAGS})
+
+
     # Test delivery: Multiple
     set(SRC_TEST_DELIVERY_MULTIPLE test/delivery-test/delivery-test-multiple.c)
     add_executable(${POMELO_TEST_DELIVERY_MULTIPLE} ${SRC_TEST_DELIVERY_MULTIPLE})
@@ -716,6 +734,7 @@ if (POMELO_BUILD_TESTS)
     add_test(NAME ${POMELO_TEST_PROTOCOL_UNENCRYPTED} COMMAND ${POMELO_TEST_PROTOCOL_UNENCRYPTED})
 
     add_test(NAME ${POMELO_TEST_DELIVERY_SINGLE} COMMAND ${POMELO_TEST_DELIVERY_SINGLE})
+    add_test(NAME ${POMELO_TEST_DELIVERY_MALFORMED} COMMAND ${POMELO_TEST_DELIVERY_MALFORMED})
     add_test(NAME ${POMELO_TEST_DELIVERY_MULTIPLE} COMMAND ${POMELO_TEST_DELIVERY_MULTIPLE})
 
     add_test(NAME ${POMELO_TEST_API_BASIC} COMMAND ${POMELO_TEST_API_BASIC})
