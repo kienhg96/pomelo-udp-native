@@ -113,6 +113,52 @@ static int test_random_deterministic_is_repeatable(void) {
     return 0;
 }
 
+static int test_token_private_roundtrip(void) {
+    pomelo_track_function();
+
+    uint8_t key[POMELO_KEY_BYTES];
+    pomelo_random_buffer(key, sizeof(key));
+
+    pomelo_connect_token_t in;
+    memset(&in, 0, sizeof(in));
+    in.protocol_id = 0x1122334455667788ULL;
+    in.expire_timestamp = 9999999999ULL;
+    in.client_id = 0x00000000CAFEBABEULL;
+    in.timeout = 10;
+    in.naddresses = 1;
+    pomelo_check(
+        pomelo_address_from_string(&in.addresses[0], "127.0.0.1:9000") == 0
+    );
+    pomelo_random_buffer(in.connect_token_nonce, POMELO_CONNECT_TOKEN_NONCE_BYTES);
+    pomelo_random_buffer(in.client_to_server_key, POMELO_KEY_BYTES);
+    pomelo_random_buffer(in.server_to_client_key, POMELO_KEY_BYTES);
+    pomelo_random_buffer(in.user_data, POMELO_USER_DATA_BYTES);
+
+    uint8_t priv[POMELO_CONNECT_TOKEN_PRIVATE_BYTES];
+    int ret = pomelo_codec_encode_private_connect_token(priv, &in, key);
+    pomelo_check(ret == 0);
+
+    pomelo_connect_token_t out;
+    memset(&out, 0, sizeof(out));
+    // AAD inputs must match what was used at encryption time.
+    out.protocol_id = in.protocol_id;
+    out.expire_timestamp = in.expire_timestamp;
+    memcpy(
+        out.connect_token_nonce,
+        in.connect_token_nonce,
+        POMELO_CONNECT_TOKEN_NONCE_BYTES
+    );
+
+    ret = pomelo_connect_token_decode_private(priv, &out, key);
+    pomelo_check(ret == 0);
+    pomelo_check(out.client_id == in.client_id);
+    pomelo_check(out.naddresses == 1);
+    pomelo_check(
+        memcmp(out.client_to_server_key, in.client_to_server_key, POMELO_KEY_BYTES) == 0
+    );
+    return 0;
+}
+
 
 int main(void) {
     printf("Crypto test\n");
@@ -123,6 +169,7 @@ int main(void) {
     pomelo_run_test(test_decode_public_rejects_bad_version);
     pomelo_run_test(test_random_deterministic_uses_full_seed);
     pomelo_run_test(test_random_deterministic_is_repeatable);
+    pomelo_run_test(test_token_private_roundtrip);
 
     pomelo_random_buffer(key, sizeof(key));
     pomelo_random_buffer(ad, sizeof(ad));

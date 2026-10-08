@@ -2,6 +2,7 @@
 #include <string.h>
 #include "sodium/crypto_aead_xchacha20poly1305.h"
 #include "sodium/crypto_aead_chacha20poly1305.h"
+#include "sodium/utils.h"
 #include "base/constants.h"
 #include "base/payload.h"
 #include "token.h"
@@ -199,6 +200,7 @@ int pomelo_connect_token_decode_private(
     );
 
     if (ret != 0) {
+        sodium_memzero(decrypted, sizeof(decrypted));
         return ret;
     }
 
@@ -219,6 +221,7 @@ int pomelo_connect_token_decode_private(
             &token->naddresses,
             token->addresses
         ) != 0) {
+        sodium_memzero(decrypted, sizeof(decrypted));
         return -1;
     }
 
@@ -243,6 +246,7 @@ int pomelo_connect_token_decode_private(
         POMELO_USER_DATA_BYTES
     );
 
+    sodium_memzero(decrypted, sizeof(decrypted));
     return 0;
 }
 
