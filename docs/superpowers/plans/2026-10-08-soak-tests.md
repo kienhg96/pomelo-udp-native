@@ -12,6 +12,8 @@
 
 **Standing constraints:** local commits only — **DO NOT push**. Every commit ends with footer `Co-Authored-By: claude-flow <ruv@ruv.net>`.
 
+> **✅ ALL DONE (2026-10-08, local commits).** Task 1 `6cfe3b3` · Task 2 `a57df0b` (soak-delivery, lossless + in-flight=1 + graceful drain) · Task 3 `aa9e0d1` · Task 4 `825c732` · Task 5 `312e60d` (persistent-only; churn deferred) · Task 6 `fc872b7`. Detour approved by user: `fix(utils)` `e7a0776` (real `pomelo_list_iterator_transfer` bug surfaced by the soak + regression test). Open finding recorded: `bus.c:416` reliable-under-loss (soak-delivery kept lossless). Full CTest suite 19/19 green; all 4 soaks PASS.
+
 ---
 
 ## File structure (locked)
