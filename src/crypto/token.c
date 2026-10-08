@@ -404,8 +404,8 @@ int pomelo_connect_token_decode_public(
 
     // Check the version info
     int cmp = memcmp(buffer, POMELO_VERSION_INFO, POMELO_VERSION_INFO_BYTES);
-    if (cmp != 0) { // Not equals
-        return 0;
+    if (cmp != 0) { // Not equals -> invalid token
+        return -1;
     }
 
     payload.position += POMELO_VERSION_INFO_BYTES;

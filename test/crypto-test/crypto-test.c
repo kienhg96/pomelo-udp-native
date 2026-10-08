@@ -73,6 +73,22 @@ static int test_decode_addresses_roundtrip(void) {
     return 0;
 }
 
+static int test_decode_public_rejects_bad_version(void) {
+    pomelo_track_function();
+
+    uint8_t buf[POMELO_CONNECT_TOKEN_BYTES];
+    memset(buf, 0, sizeof(buf));
+    // Corrupt the version-info prefix so it never matches.
+    memset(buf, 0xAB, POMELO_VERSION_INFO_BYTES);
+
+    pomelo_connect_token_t token;
+    memset(&token, 0, sizeof(token));
+
+    int ret = pomelo_connect_token_decode_public(buf, &token);
+    pomelo_check(ret < 0); // bad version must be rejected
+    return 0;
+}
+
 
 int main(void) {
     printf("Crypto test\n");
@@ -80,6 +96,7 @@ int main(void) {
 
     pomelo_run_test(test_decode_addresses_rejects_overflow);
     pomelo_run_test(test_decode_addresses_roundtrip);
+    pomelo_run_test(test_decode_public_rejects_bad_version);
 
     pomelo_random_buffer(key, sizeof(key));
     pomelo_random_buffer(ad, sizeof(ad));
