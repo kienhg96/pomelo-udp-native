@@ -122,7 +122,10 @@ static int pomelo_test_connect_token(void) {
     );
     token.client_id = random_i64();
     token.timeout = random_i32();
-    token.naddresses = random_u16() % POMELO_CONNECT_TOKEN_MAX_ADDRESSES;
+    // At least 1 address: a connect token with 0 server addresses is invalid
+    // and is rejected on decode (crypto/token.c naddr==0 guard), so 0 here
+    // would make this roundtrip test fail ~1/MAX of the time.
+    token.naddresses = 1 + random_u16() % POMELO_CONNECT_TOKEN_MAX_ADDRESSES;
     for (int i = 0; i < token.naddresses; i++) {
         token.addresses[i].type = POMELO_ADDRESS_IPV4;
         token.addresses[i].ip.v4[0] = random_u8();
