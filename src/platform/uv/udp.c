@@ -138,7 +138,7 @@ int pomelo_platform_uv_udp_bind(
     pomelo_platform_uv_udp_t * socket =
         pomelo_pool_acquire(manager->socket_pool, NULL);
     if (!socket) return -1; // Failed to acquire socket
-    
+
     // Setup socket
     socket->manager = manager;
 
@@ -214,7 +214,7 @@ int pomelo_platform_uv_udp_connect(
     udp->data = socket;
 
     int err;
-    
+
 #if UV_UV_CONNECT_AVAILABLE == 1
     // uv_udp_connect is only available after uv version 1.27.0
     err = uv_udp_connect(udp, (struct sockaddr *) &addr);
@@ -309,6 +309,7 @@ int pomelo_platform_uv_udp_send(
     assert(udp_handle != NULL);
     assert(iovec != NULL);
     assert(niovec > 0);
+    assert(niovec <= POMELO_PLATFORM_UDP_MAX_NUMBER_BUF_VECTORS);
 
     // Check the handle
     if (udp_handle->type != POMELO_PLATFORM_HANDLE_UDP) return -1;
@@ -413,7 +414,7 @@ void pomelo_platform_uv_udp_alloc_callback(
     }
 
     socket->alloc_callback(socket->context, &iovec);
-    
+
     buf->base = (char *) iovec.data;
     buf->len = (BUFFER_LENGTH_TYPE) iovec.length;
 }
@@ -431,13 +432,13 @@ void pomelo_platform_uv_udp_recv_callback(
     (void) flags;
 
     pomelo_address_t address;
-    int address_valid = addr 
+    int address_valid = addr
         ? pomelo_address_from_sockaddr(&address, addr) == 0
         : 0;
 
     pomelo_platform_iovec_t iovec;
     iovec.data = (uint8_t *) buf->base;
-    iovec.length = (size_t) nread;
+    iovec.length = (nread > 0) ? (size_t) nread : 0;
 
     if (nread > 0) {
         socket->manager->recv_bytes += nread;
