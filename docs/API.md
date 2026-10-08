@@ -1,249 +1,173 @@
-# Pomelo UDP Library API Documentation
+# Pomelo API Layer (Agent Reference)
 
-## Overview
-Pomelo UDP is a connection-oriented UDP networking library that provides reliable and secure communication with built-in connection management, encryption, and delivery guarantees.
+> The public surface of the engine — Socket / Session / Channel / Message plus the
+> plugin system. For orientation + build/test start at [`/CLAUDE.md`](../CLAUDE.md);
+> for the cross-cutting memory/threading/data-flow model see
+> [`docs/ARCHITECTURE.md`](ARCHITECTURE.md). Public header: `include/pomelo/api.h`.
 
-## Core Concepts
+## Role
 
-### Socket
-The primary interface for network communication. Can operate in either client or server mode.
+The API layer is the only layer applications link against. It exposes four opaque
+handles — **Socket**, **Session**, **Channel**, **Message** — and a **plugin**
+registry, all declared in `include/pomelo/api.h`. A socket dispatches sends through
+`channel->methods->send` (`src/api/channel.h:36`); the concrete implementation is
+chosen per session type: **builtin** sessions (`src/api/builtin/`) wrap the
+delivery + protocol layers (the real UDP transport), while **plugin** sessions
+(`src/api/plugin/`) wrap custom transports supplied by a loaded plugin. The layer
+owns no I/O itself — it is a thin, method-table-driven façade over Delivery/Protocol.
 
-### Session
-Represents an established connection between peers with:
-- Unique client ID
-- Multiple channels
-- RTT statistics
-- Connection state
+## Core concepts
 
-### Channel
-A logical communication path with configurable delivery modes:
-- `RELIABLE`: Guaranteed delivery and ordering
-- `SEQUENCED`: Ordered delivery without guarantees
-- `UNRELIABLE`: Best-effort delivery
+- **Socket** (`src/api/socket.c`, `socket.h`) — client or server endpoint. Created
+  from a `pomelo_context_t` with a fixed channel count + per-channel default modes;
+  servers `listen`, clients `connect` with a connect token. Holds the session list,
+  the protocol socket, the adapter, and its own `sequencer`.
+- **Session** (`src/api/session.c`, `session.h`) — one established peer connection.
+  Carries `client_id`, `address`, a monotonic atomic **signature** (stale-handle
+  guard), and a `methods` table. Type is `BUILTIN` or `PLUGIN` (`session.h:55`).
+- **Channel** (`src/api/channel.c`, `channel.h`) — a logical stream on a session with
+  a delivery **mode** (`pomelo_channel_mode`, `include/pomelo/common.h:96`):
+  `UNRELIABLE` (0, best-effort), `SEQUENCED` (1, ordered, may drop stale),
+  `RELIABLE` (2, guaranteed + ordered). Mode is per-channel and can be changed at
+  runtime via `pomelo_channel_set_mode`.
+- **Message** (`src/api/message.c`, `message.h`) — a ref-counted, poolable buffer
+  wrapping a delivery parcel. It is **mode-stateful**: `WRITE` (writer active) or
+  `READ` (reader active); typed `write_*`/`read_*` helpers (`message.c:201-539`) are
+  bounds-checked. `pomelo_message_reset` returns it to empty+writable.
 
-## API Reference
+**Usage flow:** create a context → `pomelo_socket_create` with channel config →
+server `pomelo_socket_listen` / client `pomelo_socket_connect(token)` → on connect,
+acquire a message (`pomelo_context_acquire_message`), write fields, then
+`pomelo_session_send` / `pomelo_channel_send` / `pomelo_socket_send` (multicast) →
+receive via the external `pomelo_socket_on_received` callback → query
+`pomelo_session_get_rtt` → `pomelo_session_disconnect` / `pomelo_socket_stop` /
+`pomelo_socket_destroy`.
 
-### Socket Creation and Management
+Receive + connect/disconnect events are delivered through **external-linkage
+callbacks** the application must define (`api.h:299-348`):
+`pomelo_socket_on_connected`, `_on_disconnected`, `_on_received`,
+`_on_connect_result`, `_on_send_result`.
 
-```c
-// Create a server socket
-pomelo_socket_t* pomelo_server_create(
-    pomelo_server_config_t* config
-);
+## File map
 
-// Create a client socket
-pomelo_socket_t* pomelo_client_create(
-    pomelo_client_config_t* config
-);
+| File | Responsibility |
+|------|----------------|
+| `src/api/context.c` / `context.h` | Root + shared `pomelo_context_t`; owns pools (socket/session/channel/message), buffer/protocol/delivery/plugin sub-contexts; `message_capacity`; message acquire/release |
+| `src/api/socket.c` / `socket.h` | Socket lifecycle, listen/connect/stop, multicast send + builtin/plugin partitioning, `dispatch_send_result`, session list |
+| `src/api/session.c` / `session.h` | Session façade: send, disconnect, get_channel, get_rtt, signature; base init/cleanup + method tables |
+| `src/api/channel.c` / `channel.h` | Channel façade: send, set/get mode; method table |
+| `src/api/message.c` / `message.h` | Message ref-counting, pack/unpack, prepare/finish send, typed bounds-checked write/read |
+| `src/api/builtin/` | Builtin session/channel over Delivery+Protocol (`session.c`, `channel.c`, `delivery.c`, `protocol.c`) |
+| `src/api/plugin/` | Plugin manager, loader (`dlopen`), plugin-backed session/channel/socket/message/token, dispatch hooks |
 
-// Start the socket
-int pomelo_socket_start(pomelo_socket_t* socket);
+## Key types & entry points
 
-// Stop the socket
-void pomelo_socket_stop(pomelo_socket_t* socket);
+- **`pomelo_context_t`** (`src/api/context.h:49`) — root (`pomelo_context_root_create`,
+  `context.c:30`, optionally `synchronized`) vs shared (`pomelo_context_shared_create`,
+  `context.c:337`, non-threadsafe child of a synchronized root). Holds all object
+  pools + `message_capacity` (default 65536, `context.h:20`).
+  `pomelo_context_acquire_message` (`context.c:499`) hands out a fresh WRITE message.
+- **Socket**: `pomelo_socket_create` (`socket.c:166`; enforces
+  `0 < nchannels <= POMELO_MAX_CHANNELS` = 1024, `constants.h:21`),
+  `pomelo_socket_listen` (`socket.c:241`), `pomelo_socket_connect` (`socket.c:197`;
+  both require state `STOPPED`), `pomelo_socket_send` multicast (`socket.c:325`),
+  `pomelo_socket_destroy` (`socket.c:178`, deferred via sequencer).
+- **Session**: `pomelo_session_send` (`session.c:41`), `pomelo_session_disconnect`
+  (`session.c:87`, deferred), `pomelo_session_get_channel` (`session.c:114`),
+  `pomelo_session_get_signature` (`session.c:75`), `pomelo_session_get_rtt`
+  (`session.c:99`).
+- **Channel**: `pomelo_channel_send` (`channel.c:26`), `pomelo_channel_set_mode`
+  (`channel.c:42`), `pomelo_channel_get_mode` (`channel.c:58`). Method table:
+  `pomelo_channel_methods_t` (`channel.h:36`).
+- **Message**: `pomelo_message_write_buffer` (`message.c:201`, OVERFLOW gate at
+  `message.c:219`), `pomelo_message_read_buffer` (`message.c:359`, UNDERFLOW at
+  `message.c:375`), ref lifecycle `pomelo_message_ref`/`_unref` (`message.c:31`/`:39`),
+  internal `prepare_send`/`finish_send`/`on_finalize` (`message.c:179`/`:189`/`:173`).
 
-// Destroy the socket
-void pomelo_socket_destroy(pomelo_socket_t* socket);
-```
+## Ownership & lifetime (IMPORTANT)
 
-### Configuration Structures
+**Message ref-counting is the heart of send correctness.** A message is pooled and
+ref-counted (`pomelo_reference_t`, finalize → pool). The send lifecycle:
 
-```c
-struct pomelo_server_config_s {
-    pomelo_allocator_t* allocator;      // Memory allocator
-    uint64_t protocol_id;               // Protocol identifier
-    uint8_t private_key[PRIVATE_KEY_BYTES]; // Server private key
-    size_t max_clients;                 // Maximum concurrent clients
-    size_t nchannels;                   // Number of channels
-    pomelo_channel_mode* channel_modes; // Channel configuration
-};
+1. Every public send entry (`pomelo_session_send`, `pomelo_channel_send`,
+   `pomelo_socket_send`) first calls **`pomelo_message_prepare_send`**
+   (`message.c:179`): ref **+1**, sets `POMELO_MESSAGE_FLAG_BUSY`, zeroes `nsent`,
+   stores the callback `data`. While BUSY the message is locked — writes/reads
+   return `POMELO_ERR_MESSAGE_BUSY`.
+2. The terminal step is **`pomelo_socket_dispatch_send_result`** (`socket.c:583`).
+   It is the **single place** that calls `pomelo_message_finish_send`
+   (`message.c:189`: clear BUSY, unref **−1**) and then fires the external
+   `pomelo_socket_on_send_result(socket, message, data, nsent)` callback.
+3. When the last ref drops, `pomelo_message_on_finalize` (`message.c:173`) returns
+   the message to its context pool.
 
-struct pomelo_client_config_s {
-    pomelo_allocator_t* allocator;      // Memory allocator
-    size_t nchannels;                   // Number of channels
-    pomelo_channel_mode* channel_modes; // Channel configuration
-};
-```
+**Invariant:** every send path — including all early-exit/failure paths — **must**
+route through `dispatch_send_result`, or the `prepare_send` ref and the BUSY flag
+leak (message never returns to pool, caller's send callback never fires). This is
+exactly why the following early-outs each call it:
+`pomelo_session_send` signature==0 path (`session.c:54-56`) **and** the invalid-channel
+path (`session.c:62-67`, the merged fix); `pomelo_socket_send` invalid-channel /
+no-sessions / no-connected / builtin-send-failure / no-builtin paths
+(`socket.c:341,346,392,450,473`).
 
-### Session Management
+**Who owns the message after send:** the socket. Public doc contract states "the
+message WILL BE managed by socket" (`api.h:247,373`). The caller keeps its own ref
+only if it explicitly `pomelo_message_ref`'d before sending; otherwise it must treat
+the handle as surrendered. On **receive**, the message handed to
+`pomelo_socket_on_received` is released immediately after the callback returns
+(`api.h:316`) — copy out anything you need.
 
-```c
-// Get session statistics
-void pomelo_session_get_rtt(
-    pomelo_session_t* session,
-    uint64_t* mean,        // Mean RTT
-    uint64_t* variance     // RTT variance
-);
+**Stale-session guard:** `pomelo_session_cleanup` (`session.c:220`) stores signature
+`0` when a session is released. `pomelo_session_send` loads the atomic signature
+(`session.c:53`); a `0` means the caller holds a freed/recycled handle, so it
+dispatches a failure result instead of dereferencing — no use-after-free.
 
-// Configure channel mode
-int pomelo_session_set_channel_mode(
-    pomelo_session_t* session,
-    size_t channel_index,
-    pomelo_channel_mode mode
-);
+## Invariants
 
-// Send data through a channel
-int pomelo_session_send(
-    pomelo_session_t* session,
-    size_t channel_index,
-    const void* data,
-    size_t length
-);
+- **Write bounds:** `written_bytes + length > context->message_capacity` →
+  `POMELO_ERR_MESSAGE_OVERFLOW` (`message.c:219`). No over-write.
+- **Read bounds:** reader underrun → `POMELO_ERR_MESSAGE_UNDERFLOW`
+  (`message.c:375`). No over-read.
+- **Mode gating:** writing a READ-mode message → `POMELO_ERR_MESSAGE_WRITE`; reading a
+  WRITE-mode message → `POMELO_ERR_MESSAGE_READ`; writing/reading a BUSY message →
+  `POMELO_ERR_MESSAGE_BUSY`.
+- **`signature == 0` ⇒ released session.** Any API call that races against release is
+  caught by the atomic signature load, not by locking.
+- **Single-threaded by construction.** Every API operation runs on the owning loop
+  thread, serialized by the socket's `sequencer` (`socket->sequencer`). Disconnect and
+  destroy are *deferred* onto the sequencer (`session.c:89`, `socket.c:180`). Apparent
+  races (signature-check vs. send, session-list mutation) are **false positives** — see
+  [`ARCHITECTURE.md` §3](ARCHITECTURE.md).
 
-// Disconnect a session
-void pomelo_session_disconnect(
-    pomelo_session_t* session
-);
-```
+## Gotchas
 
-### Connect Token Management
+- **No plugin load/unload inside a dispatch callback.** The plugin dispatch loops
+  (`src/api/plugin/plugin.c:258-338`) iterate the plugin list with a
+  `pomelo_list_iterator_t`; `pomelo_list_iterator_next` asserts/validates
+  `mod_count` (`src/utils/list.c:498`). Loading or unloading a plugin from within a
+  lifecycle callback mutates the list mid-iteration → **fail-fast** (assert in debug,
+  early `-2` return in release that skips remaining plugins). It is *not*
+  memory-unsafe, but it is an unsupported re-entrancy — don't do it.
+- **Builtin vs plugin session tags matter on multicast.** `pomelo_socket_send`
+  partitions the `sessions[]` array in place: first filters to CONNECTED, then sorts
+  builtin-to-front / plugin-to-back, dispatches each group separately
+  (`pomelo_socket_send_builtin` `socket.c:624`, `pomelo_socket_send_plugin`
+  `socket.c:670`), then restores the original order. It mutates the caller's array
+  transiently via `tmp_original_index`.
+- **Callback re-entrancy / surrendered handles.** `on_send_result` fires from inside
+  `dispatch_send_result`; `on_received` releases the message right after returning.
+  Do not retain raw `message`/`session` pointers past the callback without taking a
+  ref, and do not assume a `session` handle cached across turns is still live — check
+  `pomelo_session_get_signature`.
+- **`pomelo_socket_get_channel_mode` returns the socket's *initial* default** for a
+  channel index; a live session's channel may have been re-moded since.
 
-```c
-// Generate a connect token
-int pomelo_generate_connect_token(
-    pomelo_connect_token_config_t* config,
-    uint8_t* token_buffer
-);
+## Plugin system
 
-// Decode a connect token
-int pomelo_decode_connect_token(
-    const uint8_t* token_buffer,
-    pomelo_connect_token_info_t* info
-);
-```
-
-### Event Callbacks
-
-```c
-// Socket event callbacks
-struct pomelo_socket_callbacks_s {
-    void (*on_started)(pomelo_socket_t* socket);
-    void (*on_stopped)(pomelo_socket_t* socket);
-    void (*on_session_connected)(pomelo_session_t* session);
-    void (*on_session_disconnected)(pomelo_session_t* session);
-    void (*on_message_received)(
-        pomelo_session_t* session,
-        size_t channel_index,
-        const void* data,
-        size_t length
-    );
-};
-```
-
-## Plugin System
-
-### Plugin Interface
-
-```c
-struct pomelo_plugin_s {
-    // Plugin lifecycle
-    void (*on_load)(pomelo_plugin_t* plugin);
-    void (*on_unload)(pomelo_plugin_t* plugin);
-    
-    // Socket events
-    void (*on_socket_created)(pomelo_socket_t* socket);
-    void (*on_socket_destroyed)(pomelo_socket_t* socket);
-    
-    // Session events
-    void (*on_session_created)(pomelo_session_t* session);
-    void (*on_session_destroyed)(pomelo_session_t* session);
-};
-```
-
-## Thread Safety
-
-### Thread-Safe Operations
-- Socket creation/destruction
-- Session management
-- Message sending/receiving
-- Configuration changes
-
-### Non-Thread-Safe Operations
-- Socket start/stop
-- Plugin loading/unloading
-- Callback registration
-
-## Error Handling
-
-### Error Codes
-```c
-enum pomelo_error_e {
-    POMELO_ERROR_OK = 0,
-    POMELO_ERROR_INVALID_ARGUMENT = -1,
-    POMELO_ERROR_OUT_OF_MEMORY = -2,
-    POMELO_ERROR_CONNECTION_FAILED = -3,
-    POMELO_ERROR_TIMEOUT = -4,
-    // ... other error codes
-};
-```
-
-## Best Practices
-
-### Socket Management
-1. Always check return values for error conditions
-2. Configure appropriate timeouts
-3. Handle disconnections gracefully
-4. Clean up resources properly
-
-### Message Sending
-1. Choose appropriate channel modes
-2. Handle send failures
-3. Monitor RTT statistics
-4. Implement proper flow control
-
-### Resource Management
-1. Use appropriate buffer sizes
-2. Monitor memory usage
-3. Handle resource exhaustion
-4. Implement proper cleanup
-
-### Security
-1. Protect private keys
-2. Validate connect tokens
-3. Monitor for suspicious activity
-4. Implement proper access control
-
-## Example Usage
-
-### Server Implementation
-```c
-// Initialize server configuration
-pomelo_server_config_t config = {0};
-config.protocol_id = MY_PROTOCOL_ID;
-config.max_clients = 32;
-config.nchannels = 2;
-config.channel_modes[0] = POMELO_CHANNEL_MODE_RELIABLE;
-config.channel_modes[1] = POMELO_CHANNEL_MODE_SEQUENCED;
-
-// Create and start server
-pomelo_socket_t* server = pomelo_server_create(&config);
-pomelo_socket_start(server);
-
-// Handle events through callbacks
-// Clean up when done
-pomelo_socket_stop(server);
-pomelo_socket_destroy(server);
-```
-
-### Client Implementation
-```c
-// Initialize client configuration
-pomelo_client_config_t config = {0};
-config.nchannels = 2;
-config.channel_modes[0] = POMELO_CHANNEL_MODE_RELIABLE;
-config.channel_modes[1] = POMELO_CHANNEL_MODE_SEQUENCED;
-
-// Create and connect client
-pomelo_socket_t* client = pomelo_client_create(&config);
-pomelo_socket_start(client);
-
-// Send messages through channels
-pomelo_session_send(session, 0, data, length);
-
-// Clean up when done
-pomelo_socket_stop(client);
-pomelo_socket_destroy(client);
-```
-```
-
-This documentation provides a comprehensive overview of the public API. Let me know if you'd like me to expand on any particular section or add more specific details.
+The plugin layer lets a custom transport masquerade as a builtin session. It lives in
+`src/api/plugin/`: `manager.c` (registry), `loader.c` (`dlopen` of a shared object
+exporting `pomelo_plugin_initializer_entry`), `plugin.c` (the `pomelo_plugin_t` API +
+lifecycle dispatch), and plugin-backed `session.c` / `channel.c` / `socket.c` /
+`message.c` / `token.c`. Lifecycle hooks (`socket_on_created/listening/connecting/
+stopped`, session created/disconnected, etc.) are dispatched from `plugin.c`.
+For the plugin authoring contract see [`docs/PLUGIN.md`](PLUGIN.md).

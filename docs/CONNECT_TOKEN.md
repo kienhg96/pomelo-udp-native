@@ -38,7 +38,7 @@ The public token contains both encrypted and unencrypted data.
 #### Structure Definition
 ```c
 struct connect_token {
-    char version_info[13];         // "POMELO 1.03\0"
+    char version_info[13];         // "POMELO 1.00\0"
     uint64_t protocol_id;          // Application identifier
     uint64_t create_timestamp;     // Token creation time
     uint64_t expire_timestamp;     // Token expiration time
@@ -101,7 +101,7 @@ crypto_aead_xchacha20poly1305_ietf_encrypt
 #### Associated Data
 ```c
 struct {
-    char version_info[13];     // "POMELO 1.03\0"
+    char version_info[13];     // "POMELO 1.00\0"
     uint64_t protocol_id;      // Application identifier
     uint64_t expire_timestamp; // Token expiration time
 };

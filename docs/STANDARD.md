@@ -80,7 +80,7 @@ This data is variable size but for simplicity is written to a fixed size buffer 
 
 Encryption of the private connect token data is performed with the libsodium AEAD primitive *crypto_aead_xchacha20poly1305_ietf_encrypt* using the following binary data as the _associated data_: 
 
-    [version info] (13 bytes)       // "POMELO 1.03" ASCII with null terminator.
+    [version info] (13 bytes)       // "POMELO 1.00" ASCII with null terminator.
     [protocol id] (uint64)          // 64 bit value unique to this particular game/application
     [expire timestamp] (uint64)     // 64 bit unix timestamp when this connect token expires
 
@@ -95,7 +95,7 @@ Post encryption, this is referred to as the _encrypted private connect token dat
 
 Together the public and private data form a _connect token_:
 
-    [version info] (13 bytes)       // "POMELO 1.03" ASCII with null terminator.
+    [version info] (13 bytes)       // "POMELO 1.00" ASCII with null terminator.
     [protocol id] (uint64)          // 64 bit value unique to this particular game/application
     [create timestamp] (uint64)     // 64 bit unix timestamp when this connect token was created
     [expire timestamp] (uint64)     // 64 bit unix timestamp when this connect token expires
@@ -165,12 +165,11 @@ This is referred to as the _encrypted challenge token data_.
 * _connection keep alive packet_ (4)
 * _connection payload packet_ (5)
 * _connection disconnect packet_ (6)
-* _connection pong packet_ (7)
 
 The first packet type _connection request packet_ (0) is not encrypted and has the following format:
 
     0 (uint8) // prefix byte of zero
-    [version info] (13 bytes)       // "POMELO 1.03" ASCII with null terminator.
+    [version info] (13 bytes)       // "POMELO 1.00" ASCII with null terminator.
     [protocol id] (8 bytes)
     [connect token expire timestamp] (8 bytes)
     [connect token nonce] (24 bytes)
@@ -217,19 +216,9 @@ _connection response packet_ (308 bytes):
     [challenge token sequence] (uint64)
     [encrypted challenge token data] (300 bytes)
 
-_connection keep alive packet_ (3 to 19 bytes):
+_connection keep alive packet_ (8 bytes):
 
-    [keep alive meta] (uint8)
-    [time] (0 to 8 bytes)
-    [client ID] (1 to 8 bytes)
-    [keep alive sequence] (1 to 2 bytes)
-
-_connection pong packet_ (4 to 25 bytes):
-
-    [pong encrypted meta] (uint8)
-    [keep alive sequence] (1 to 2 bytes)
-    [recv time] (1 to 8 bytes)
-    [delta time] (1 to 8 bytes)
+    [client ID] (int64)
 
 _connection payload packet_ (1 to 1200 bytes):
 
@@ -241,7 +230,7 @@ _connection disconnect packet_ (0 bytes):
 
 The per-packet type data is encrypted using the libsodium AEAD primitive *crypto_aead_chacha20poly1305_ietf_encrypt* with the following binary data as the _associated data_: 
 
-    [version info] (13 bytes)       // "POMELO 1.03" ASCII with null terminator.
+    [version info] (13 bytes)       // "POMELO 1.00" ASCII with null terminator.
     [protocol id] (uint64)          // 64 bit value unique to this particular game/application
     [prefix byte] (uint8)           // prefix byte in packet. stops an attacker from modifying packet type.
 
@@ -279,8 +268,7 @@ The following steps are taken when reading an encrypted packet, in this exact or
     * 0 bytes for _connection denied packet_
     * 308 bytes for _connection challenge packet_
     * 308 bytes for _connection response packet_
-    * [3,17] bytes for _connection keep alive packet_
-    * [2,9] bytes for _connection pong packet_
+    * 8 bytes for _connection keep alive packet_
     * [1,1200] bytes for _connection payload packet_
     * 0 bytes for _connection disconnect packet_
 
@@ -320,9 +308,11 @@ Replay protection is applied to the following packet types on both client and se
 
 The replay buffer size is implementation specific, but as a guide, a few seconds worth of packets at a typical send rate (20-60HZ) should be supported. Conservatively, a replay buffer size of 256 entries per-client should be sufficient for most applications.
 
-## Keep alive/Pong
+## Keep alive
 
-After receiving keep alive packet, the receiver will reply with pong packet associated with the keep alive sequence in the received keep alive packet. Maximum value for keep alive sequence is 0xFFFF (maximum 2 bytes)
+The _connection keep alive packet_ carries only the _client ID_ (int64, 8-byte encrypted body) and is sent periodically — by both the client and the server — whenever no _connection payload packet_ is flowing, to keep the connection alive and reset the other side's timeout. It is encrypted and replay-protected like any other connected-state packet.
+
+There is **no reply packet** — a keep alive is not acknowledged. (Earlier revisions of this protocol defined a _connection pong packet_ carrying a keep-alive sequence and timing data; that packet has been removed and is no longer part of the protocol.)
 
 ## Client State Machine
 
@@ -371,7 +361,7 @@ If a _connection request denied_ packet is received while in _sending connection
 
 While in _sending challenge response_ the client sends _challenge response packets_ to the server at some rate, like 10HZ. 
 
-When the client receives a _connection keep alive packet_ from the server, it stores the client index and max clients in the packet, and transitions to _connected_.
+When the client receives a _connection keep alive packet_ from the server, it transitions to _connected_. (The Pomelo keep alive packet carries only the _client ID_; it does not convey a client index or max-clients count.)
 
 Any _connection payload packets_ received prior to _connected_ are discarded.
 
@@ -421,7 +411,7 @@ The server follows these strict rules when processing connection requests:
 When a server receives a connection request packet from a client it contains the following data:
 
     0 (uint8) // prefix byte of zero
-    [version info] (13 bytes)       // "POMELO 1.03" ASCII with null terminator.
+    [version info] (13 bytes)       // "POMELO 1.00" ASCII with null terminator.
     [protocol id] (8 bytes)
     [connect token expire timestamp] (8 bytes)
     [connect token nonce] (24 bytes)
@@ -437,7 +427,7 @@ The server takes the following steps, in this exact order, when processing a _co
 
 * If the packet is not the expected size of 1078 bytes, ignore the packet.
 
-* If the version info in the packet doesn't match "POMELO 1.03" (13 bytes, with null terminator), ignore the packet.
+* If the version info in the packet doesn't match "POMELO 1.00" (13 bytes, with null terminator), ignore the packet.
 
 * If the protocol id in the packet doesn't match the expected protocol id of the dedicated server, ignore the packet.
 
@@ -474,7 +464,7 @@ The _connection response packet_ contains the following data:
     [prefix byte] (uint8) // non-zero prefix byte: ( (num_sequence_bytes<<4) | packet_type )
     [sequence number] (variable length 1-8 bytes)
     [challenge token sequence] (uint64)
-    [encrypted challenge token data] (360 bytes)
+    [encrypted challenge token data] (300 bytes)
 
 The server takes these steps, in this exact order, when processing a _connection response packet_:
 
@@ -514,7 +504,7 @@ The server application may also send _connection payload packets_ to connected c
 
 In the absence of _connection payload packets_ sent to a client, the server generates and sends _connection keep alive packets_ to that client at some rate, like 10HZ.
 
-While the _confirmed_ flag for a client slot is false, each _connection payload packet_ sent to that client has a _connection keep alive packet_ sent before it. This communicates the _client index_ and the _max clients_ to that client, which it needs to transition to a fully connected state.
+While the _confirmed_ flag for a client slot is false, each _connection payload packet_ sent to that client has a _connection keep alive packet_ sent before it, which the client needs in order to transition to a fully connected state.
 
 When the server receives a _connection payload packet_ or a _connection keep alive packet_ from an unconfirmed client, it sets the _confirmed_ flag for that client slot to true, and stops prefixing _connection payload packets_ with _connection keep alive packets_.
 
