@@ -354,6 +354,7 @@ if (POMELO_BUILD_TESTS)
     set(POMELO_TEST_PROTOCOL_SERVER_DOS pomelo-test-protocol-server-dos)
     set(POMELO_TEST_PROTOCOL_PACKET pomelo-test-protocol-packet)
     set(POMELO_TEST_DELIVERY_SINGLE pomelo-test-delivery-single)
+    set(POMELO_TEST_DELIVERY_REORDER pomelo-test-delivery-reorder)
     set(POMELO_TEST_DELIVERY_MALFORMED pomelo-test-delivery-malformed)
     set(POMELO_TEST_DELIVERY_MULTIPLE pomelo-test-delivery-multiple)
     set(POMELO_TEST_API_BASIC pomelo-test-api-basic)
@@ -590,6 +591,23 @@ if (POMELO_BUILD_TESTS)
     target_compile_options(${POMELO_TEST_DELIVERY_SINGLE} PRIVATE ${POMELO_COMPILE_FLAGS})
 
 
+    # Test delivery: Out-of-order reassembly + duplicate dedup
+    set(SRC_TEST_DELIVERY_REORDER test/delivery-test/delivery-reorder-test.c)
+    add_executable(${POMELO_TEST_DELIVERY_REORDER} ${SRC_TEST_DELIVERY_REORDER})
+    target_include_directories(${POMELO_TEST_DELIVERY_REORDER} PRIVATE ${POMELO_TEST_INCLUDE})
+    target_link_libraries(${POMELO_TEST_DELIVERY_REORDER} PRIVATE
+        ${POMELO_BASE}
+        ${POMELO_UTILS}
+        ${POMELO_CRYPTO}
+        ${POMELO_DELIVERY}
+        ${POMELO_PLATFORM_UV}
+        ${POMELO_TEST_STATISTIC_CHECK}
+        ${LIB_UV}
+        ${LIB_SODIUM}
+    )
+    target_compile_options(${POMELO_TEST_DELIVERY_REORDER} PRIVATE ${POMELO_COMPILE_FLAGS})
+
+
     # Test delivery: Malformed fragment guards
     set(SRC_TEST_DELIVERY_MALFORMED test/delivery-test/delivery-malformed-test.c)
     add_executable(${POMELO_TEST_DELIVERY_MALFORMED} ${SRC_TEST_DELIVERY_MALFORMED})
@@ -735,6 +753,7 @@ if (POMELO_BUILD_TESTS)
     add_test(NAME ${POMELO_TEST_PROTOCOL_UNENCRYPTED} COMMAND ${POMELO_TEST_PROTOCOL_UNENCRYPTED})
 
     add_test(NAME ${POMELO_TEST_DELIVERY_SINGLE} COMMAND ${POMELO_TEST_DELIVERY_SINGLE})
+    add_test(NAME ${POMELO_TEST_DELIVERY_REORDER} COMMAND ${POMELO_TEST_DELIVERY_REORDER})
     add_test(NAME ${POMELO_TEST_DELIVERY_MALFORMED} COMMAND ${POMELO_TEST_DELIVERY_MALFORMED})
     add_test(NAME ${POMELO_TEST_DELIVERY_MULTIPLE} COMMAND ${POMELO_TEST_DELIVERY_MULTIPLE})
 
