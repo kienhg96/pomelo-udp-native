@@ -59,7 +59,12 @@ void pomelo_session_send(
     // Get the channel
     pomelo_channel_t * channel =
         pomelo_session_get_channel(session, channel_index);
-    if (!channel) return; // Invalid channel
+    if (!channel) {
+        // Invalid channel: finish the send so the message ref/BUSY flag are
+        // balanced and the send callback is still invoked (as a failure).
+        pomelo_socket_dispatch_send_result(session->socket, message);
+        return;
+    }
 
     // And send through it
     assert(channel->methods != NULL && channel->methods->send != NULL);
