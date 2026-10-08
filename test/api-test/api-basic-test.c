@@ -44,6 +44,15 @@ static size_t recv_counter = 0;
 
 static volatile int exchange_done = 0;
 
+// Regression (Task 13): invalid-channel send result.
+// A send on an out-of-range channel index must still dispatch a send result
+// (as a failure) instead of silently dropping the message. The send-result
+// callback below tags this specific send via a sentinel `data` pointer so it
+// can be told apart from the normal (valid) sends.
+static volatile int invalid_send_result_fired = 0;
+static volatile size_t invalid_send_result_code = 1; // non-zero until captured
+static int invalid_send_tag; // sentinel passed as `data` for the invalid send
+
 
 // Temp variables
 static pomelo_context_root_options_t context_options;
@@ -109,7 +118,7 @@ int main(void) {
 
     // Test messages
     pomelo_message_t * message = pomelo_context_acquire_message(context);
-    
+
     pomelo_check(message != NULL);
     pomelo_check(pomelo_message_size(message) == 0);
     pomelo_check(pomelo_message_write_int32(message, 1234) == 0);
@@ -165,6 +174,11 @@ int main(void) {
     pomelo_context_destroy(context);
     pomelo_test_platform_destroy(platform);
 
+    // Regression (Task 13): the out-of-range channel send must have delivered
+    // a send-result callback, reported as a failure (zero recipients).
+    pomelo_check(invalid_send_result_fired == 1);
+    pomelo_check(invalid_send_result_code == 0);
+
     // Check memleak
     pomelo_check(exchange_done == 1);
     pomelo_check(alloc_bytes == pomelo_allocator_allocated_bytes(allocator));
@@ -207,7 +221,7 @@ void pomelo_client_on_received(
 ) {
     (void) session;
     (void) client;
-    
+
     pomelo_track_function();
 
     // Check received message
@@ -282,7 +296,7 @@ void pomelo_server_on_received(
     ret = pomelo_channel_set_mode(channel, POMELO_CHANNEL_MODE_RELIABLE);
     pomelo_check(ret == 0);
 
-    pomelo_session_t * sessions[] = { server_session }; 
+    pomelo_session_t * sessions[] = { server_session };
     pomelo_socket_send(
         server,
         API_TEST_CHANNEL,
@@ -323,6 +337,29 @@ static int on_ready(void) {
         NULL
     );
     pomelo_message_unref(message);
+
+    // Regression (Task 13): send on an out-of-range channel index. Valid
+    // indices are 0..API_TEST_CHANNELS-1, so API_TEST_CHANNELS is one past the
+    // last valid index. The hardening fix in src/api/session.c must still
+    // dispatch a send-result callback (reported as a failure) rather than
+    // silently dropping the message. The sentinel `&invalid_send_tag` lets the
+    // callback distinguish this send from the normal exchange.
+    pomelo_message_t * invalid_message =
+        pomelo_context_acquire_message(context);
+    pomelo_check(invalid_message != NULL);
+
+    value = 99;
+    ret = pomelo_message_write_buffer(invalid_message, &value, 1);
+    pomelo_check(ret == 0);
+
+    pomelo_session_send(
+        client_session,
+        API_TEST_CHANNELS, // one past the last valid channel index
+        invalid_message,
+        &invalid_send_tag
+    );
+    pomelo_message_unref(invalid_message);
+
     return 0;
 }
 
@@ -442,9 +479,17 @@ void pomelo_socket_on_send_result(
 ) {
     (void) socket;
     (void) message;
-    (void) data;
-    (void) send_count;
     pomelo_track_function();
+
+    // Regression (Task 13): the out-of-range channel send is tagged with the
+    // sentinel pointer. Its result must still be dispatched here, reported as a
+    // failure (send_count == 0, i.e. delivered to zero sessions).
+    if (data == &invalid_send_tag) {
+        invalid_send_result_fired = 1;
+        invalid_send_result_code = send_count;
+        return;
+    }
+
     pomelo_check(send_count > 0);
 
     sent_counter += send_count;
