@@ -26,7 +26,4 @@ void pomelo_test_platform_destroy(pomelo_platform_t * platform) {
 void pomelo_test_platform_run(pomelo_platform_t * platform) {
     (void) platform;
     uv_run(uv_default_loop(), UV_RUN_DEFAULT);
-    // All platform handles (including idle_close) must be closed so the loop
-    // can be torn down cleanly.
-    pomelo_check(uv_loop_close(uv_default_loop()) == 0);
 }

@@ -1,3 +1,4 @@
+#include "uv.h"
 #include "platform-test.h"
 #include "pomelo-test.h"
 #include "utils/pool.h"
@@ -218,7 +219,7 @@ static void server_recv_callback(
     int value = 0;
     int ret = pomelo_payload_read_int32(&payload, &value);
     printf("[i] Received data: %d with result %d\n", value, ret);
-    
+
     // Check the data
     if (value != CLIENT_TO_SERVER_DATA) {
         printf("[!] Received data check failed");
@@ -315,7 +316,7 @@ static int pomelo_test_platform_socket(void) {
     // Server starts listening on specific address
     int ret = pomelo_platform_udp_bind(platform, &addr, &server);
     pomelo_check(ret == 0);
-    
+
     // Client starts connecting to server
     ret = pomelo_platform_udp_connect(platform, &addr, &client);
     pomelo_check(ret == 0);
@@ -349,7 +350,7 @@ static int pomelo_test_platform_socket(void) {
 
     // Send the payload from client to server
     printf("[i] Client send payload to Server\n");
-    
+
     pomelo_platform_iovec_t buf;
     buf.data = payload.data;
     buf.length = payload.position;
@@ -421,6 +422,11 @@ int pomelo_test_platform(void) {
     pomelo_check(pomelo_test_platform_job() == 0);
 
     pomelo_test_platform_run(platform);
+
+    // This test closes the platform (see platform_done), so once the loop has
+    // drained every platform handle (including idle_close) must be closed and
+    // the default loop can be torn down cleanly.
+    pomelo_check(uv_loop_close(uv_default_loop()) == 0);
 
     pomelo_pool_destroy(buffer_pool);
     pomelo_test_platform_destroy(platform);
