@@ -7,6 +7,7 @@ int main(void) {
 
     pomelo_run_test(pomelo_test_pool);
     pomelo_run_test(pomelo_test_list);
+    pomelo_run_test(pomelo_test_list_transfer_integrity);
     pomelo_run_test(pomelo_test_unrolled_list);
     pomelo_run_test(pomelo_test_array);
     pomelo_run_test(pomelo_test_map);

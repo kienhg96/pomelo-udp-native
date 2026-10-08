@@ -7,6 +7,7 @@ extern "C" {
 
 int pomelo_test_pool(void);
 int pomelo_test_list(void);
+int pomelo_test_list_transfer_integrity(void);
 int pomelo_test_unrolled_list(void);
 int pomelo_test_array(void);
 int pomelo_test_map(void);

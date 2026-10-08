@@ -572,11 +572,18 @@ pomelo_list_entry_t * pomelo_list_iterator_transfer(
     it->current = entry->prev;
     pomelo_list_unlink_entry(original_list, entry);
 
+    // Synchronize mod count after unlinking the entry
+    it->mod_count = original_list->mod_count;
+
     POMELO_END_CRITICAL_SECTION(mutex);
 
     // Add entry to the new list
     mutex = list->mutex;
     POMELO_BEGIN_CRITICAL_SECTION(mutex);
+
+#ifndef NDEBUG
+    entry->signature = list->entry_signature;
+#endif
 
     pomelo_list_link_back(list, entry);
 
