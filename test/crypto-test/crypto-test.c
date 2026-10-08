@@ -89,6 +89,30 @@ static int test_decode_public_rejects_bad_version(void) {
     return 0;
 }
 
+static int test_random_deterministic_uses_full_seed(void) {
+    pomelo_track_function();
+
+    // Two distinct 64-bit seeds that collapse to the SAME value under the
+    // old broken (high32 & low32) mixing, but differ as full 64-bit seeds.
+    uint8_t a[64];
+    uint8_t b[64];
+    pomelo_random_buffer_deterministic(a, sizeof(a), 0xFFFFFFFF00000001ULL);
+    pomelo_random_buffer_deterministic(b, sizeof(b), 0x00000001FFFFFFFFULL);
+    pomelo_check(memcmp(a, b, sizeof(a)) != 0); // full seed must matter
+    return 0;
+}
+
+static int test_random_deterministic_is_repeatable(void) {
+    pomelo_track_function();
+
+    uint8_t a[64];
+    uint8_t b[64];
+    pomelo_random_buffer_deterministic(a, sizeof(a), 0x123456789ABCDEF0ULL);
+    pomelo_random_buffer_deterministic(b, sizeof(b), 0x123456789ABCDEF0ULL);
+    pomelo_check(memcmp(a, b, sizeof(a)) == 0); // same seed -> same output
+    return 0;
+}
+
 
 int main(void) {
     printf("Crypto test\n");
@@ -97,6 +121,8 @@ int main(void) {
     pomelo_run_test(test_decode_addresses_rejects_overflow);
     pomelo_run_test(test_decode_addresses_roundtrip);
     pomelo_run_test(test_decode_public_rejects_bad_version);
+    pomelo_run_test(test_random_deterministic_uses_full_seed);
+    pomelo_run_test(test_random_deterministic_is_repeatable);
 
     pomelo_random_buffer(key, sizeof(key));
     pomelo_random_buffer(ad, sizeof(ad));
