@@ -552,6 +552,65 @@ git commit -m "test(webrtc): register in CTest with pomelo_check (or remove dead
 
 ---
 
+## P3 breadth — batch 2
+
+> **Status: IN PROGRESS (2026-10-08).** Tasks 19–22. Each subagent implements in a private build dir and does NOT commit; the parent verifies independently (git diff + rebuild in `build` + run + revert-proof) and commits locally. Plugin receive path stays MANUAL (browser client `../pomelo-udp-webrtc`) and is intentionally out of scope for automated CTest.
+
+### Task 19: Delivery out-of-order + duplicate fragment reassembly
+
+**Files:**
+- Create: `test/delivery-test/delivery-reorder-test.c`
+- Modify: `CMakeLists.txt` (new target `pomelo-test-delivery-reorder`, mirror the delivery-single block)
+
+On `main` the parcel-level reorder buffer lives on the dev branch; the testable reorder path here is **fragment reassembly within one parcel**. `pomelo_delivery_receiver_add_fragment` (`src/delivery/receiver.c:269`) places each fragment by `meta->fragment_index` (not arrival order) and dedups via `if (fragment->content.buffer) return;` at `receiver.c:284`.
+
+- [ ] **Step 1:** Clone the `delivery-test-single.c` harness. Use a RELIABLE parcel whose payload is large enough to span **multiple fragments** (assert `parcel->chunks->size > 1`). Disable the random drop (no `drop_chance % 5` drop) so delivery is deterministic.
+- [ ] **Step 2:** In the transporter double `pomelo_delivery_endpoint_send`, buffer each outgoing fragment packet (copy the combined view) into a queue instead of recv-ing immediately; once the parcel's fragments are all queued, flush them to the receiver in **reverse order** (out-of-order), and additionally recv **one fragment twice** (duplicate).
+- [ ] **Step 3:** Assert in `pomelo_delivery_bus_on_received` that the reassembled bytes equal the sent payload exactly, and that the received callback fires **exactly once** for the parcel (a `static volatile int` counter asserted after `uv_run`). This proves out-of-order reassembly + dedup.
+- [ ] **Step 4 (revert-proof):** Comment the dedup guard `receiver.c:284` (`if (fragment->content.buffer) return;`), rebuild+run → the duplicate fragment double-increments `recv_fragments`, so the parcel either never completes or over-counts → test MUST fail. Restore.
+- [ ] **Step 5: Commit** `test(delivery): out-of-order + duplicate fragment reassembly`.
+
+### Task 20: Challenge-token codec roundtrip + negative paths
+
+**Files:**
+- Modify: `test/crypto-test/crypto-test.c` (add tests + register in `main`)
+
+`pomelo_codec_encrypt_challenge_token` / `pomelo_codec_decrypt_challenge_token` (`src/crypto/token.c:466,517`) are untested. Token struct = `{ int64_t client_id; uint8_t user_data[POMELO_USER_DATA_BYTES]; }` (`src/crypto/token.h:16`); ciphertext size `POMELO_CHALLENGE_TOKEN_BYTES`; nonce derived from `token_sequence`.
+
+- [ ] **Step 1:** Roundtrip: encode into a payload with a random key + sequence, decode with the same key+sequence → assert `client_id` and all `user_data` bytes match.
+- [ ] **Step 2:** Negatives (each must return `< 0`): (a) decrypt with a wrong key; (b) flip one ciphertext byte; (c) decrypt with a wrong `token_sequence` (wrong nonce). Follow the payload setup used by `test_token_private_roundtrip` (`crypto-test.c:118`).
+- [ ] **Step 3:** Register in `main` after the existing `pomelo_run_test` calls (`crypto-test.c:385`).
+- [ ] **Step 4:** Build+run `pomelo-test-crypto`. Revert-proof: the AEAD/MAC is libsodium's; prove it is live by the positive roundtrip (Step 1) passing while all Step-2 negatives reject.
+- [ ] **Step 5: Commit** `test(crypto): challenge-token codec roundtrip + wrong-key/tamper/nonce rejection`.
+
+### Task 21: Server rejects spoofed REQUEST (protocol_id mismatch)
+
+**Files:**
+- Create: `test/protocol-test/server-reject-test.c` (clone the `server-dos-test.c` harness)
+- Modify: `CMakeLists.txt` (new target `pomelo-test-protocol-server-reject`, mirror the server-dos block)
+
+`pomelo_protocol_server_validate` (`src/protocol/server.c:308`) rejects a REQUEST whose `protocol_id != server->protocol_id` **synchronously, before allocating any half-open peer** (`:324`). The dos harness already measures the peak `requesting_peers` via statistics.
+
+- [ ] **Step 1:** Clone `server-dos-test.c`. Build the REQUEST exactly as `send_request_packet_from` does, but set the packet's `protocol_id` to a value **different** from the server's (e.g. `token.protocol_id ^ 0xFFFF`).
+- [ ] **Step 2:** Send `FLOOD_COUNT` such wrong-protocol REQUESTs from distinct source addresses, then capture the peak synchronously (same point the dos test does). Assert the peak requesting/half-open peer count is **0** — every spoofed REQUEST was dropped at the protocol_id check.
+- [ ] **Step 3:** Build+run `pomelo-test-protocol-server-reject`.
+- [ ] **Step 4 (revert-proof):** Comment the `protocol_id != server->protocol_id` condition at `server.c:308` (leave only the `ret < 0` check), rebuild+run → wrong-protocol REQUESTs now allocate peers → peak > 0 → assert MUST fail. Restore.
+- [ ] **Step 5: Commit** `test(protocol): server drops spoofed REQUEST with wrong protocol_id`.
+
+### Task 22: Watchdog-timeout for integration drivers (hang → failure)
+
+**Files:**
+- Modify: `test/api-test/api-basic-test.c`, `test/api-test/api-broadcast-test.c`, `test/protocol-test/protocol-test.c`
+
+`pomelo_test_platform_run` / `uv_run` have no timeout, so a stalled handshake hangs CTest instead of failing. Add a one-shot watchdog.
+
+- [ ] **Step 1:** In each driver add `static volatile int timed_out = 0;` and a one-shot platform timer (interval ~5000 ms, see `platform-test.c:160` for the call shape) armed before the run. On fire, set `timed_out = 1;` and stop the socket(s) so the loop drains.
+- [ ] **Step 2:** After the run, assert `pomelo_check(timed_out == 0);` (before the leak check). On the happy path the exchange completes and the watchdog is stopped/never fires; a real stall now fails fast instead of hanging.
+- [ ] **Step 3:** Ensure the watchdog timer is stopped/closed on the normal completion path so it does not leak or keep the loop alive. Rebuild+run all three targets green; confirm no added leak (existing leak checks still pass).
+- [ ] **Step 4: Commit** `test(integration): add watchdog timeout so a stalled run fails instead of hanging`.
+
+---
+
 ## Final verification
 
 - [ ] **Full suite green.** `cmake --build build -j && ctest --test-dir build --output-on-failure` → all 14 (plus any new) tests pass.
