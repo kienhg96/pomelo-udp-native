@@ -271,6 +271,169 @@ static int test_token_private_rejects_tamper(void) {
 }
 
 
+static int test_challenge_token_roundtrip(void) {
+    pomelo_track_function();
+
+    uint8_t ckey[POMELO_KEY_BYTES];
+    pomelo_random_buffer(ckey, sizeof(ckey));
+
+    uint64_t token_sequence = 0x0102030405060708ULL;
+
+    pomelo_challenge_token_t in;
+    memset(&in, 0, sizeof(in));
+    pomelo_random_buffer((uint8_t *) &in.client_id, sizeof(in.client_id));
+    pomelo_random_buffer(in.user_data, POMELO_USER_DATA_BYTES);
+
+    // Payload backing buffer must be >= POMELO_CHALLENGE_TOKEN_BYTES.
+    uint8_t buf[POMELO_CHALLENGE_TOKEN_BYTES];
+    pomelo_payload_t payload;
+    payload.data = buf;
+    payload.capacity = sizeof(buf);
+    payload.position = 0;
+
+    pomelo_check(
+        pomelo_codec_encrypt_challenge_token(
+            &payload, &in, ckey, token_sequence
+        ) == 0
+    );
+
+    // Rewind to the start of the ciphertext and decrypt with same key+seq.
+    payload.position = 0;
+    pomelo_challenge_token_t out;
+    memset(&out, 0, sizeof(out));
+    pomelo_check(
+        pomelo_codec_decrypt_challenge_token(
+            &payload, &out, ckey, token_sequence
+        ) == 0
+    );
+
+    pomelo_check(out.client_id == in.client_id);
+    pomelo_check(
+        memcmp(out.user_data, in.user_data, POMELO_USER_DATA_BYTES) == 0
+    );
+    return 0;
+}
+
+
+static int test_challenge_token_rejects_wrong_key(void) {
+    pomelo_track_function();
+
+    uint8_t ckey[POMELO_KEY_BYTES];
+    pomelo_random_buffer(ckey, sizeof(ckey));
+
+    uint64_t token_sequence = 0xAABBCCDDEEFF0011ULL;
+
+    pomelo_challenge_token_t in;
+    memset(&in, 0, sizeof(in));
+    pomelo_random_buffer((uint8_t *) &in.client_id, sizeof(in.client_id));
+    pomelo_random_buffer(in.user_data, POMELO_USER_DATA_BYTES);
+
+    uint8_t buf[POMELO_CHALLENGE_TOKEN_BYTES];
+    pomelo_payload_t payload;
+    payload.data = buf;
+    payload.capacity = sizeof(buf);
+    payload.position = 0;
+
+    pomelo_check(
+        pomelo_codec_encrypt_challenge_token(
+            &payload, &in, ckey, token_sequence
+        ) == 0
+    );
+
+    // Decrypt with a DIFFERENT key must be rejected.
+    uint8_t wrong_key[POMELO_KEY_BYTES];
+    pomelo_random_buffer(wrong_key, sizeof(wrong_key));
+
+    payload.position = 0;
+    pomelo_challenge_token_t out;
+    memset(&out, 0, sizeof(out));
+    pomelo_check(
+        pomelo_codec_decrypt_challenge_token(
+            &payload, &out, wrong_key, token_sequence
+        ) < 0
+    );
+    return 0;
+}
+
+
+static int test_challenge_token_rejects_tamper(void) {
+    pomelo_track_function();
+
+    uint8_t ckey[POMELO_KEY_BYTES];
+    pomelo_random_buffer(ckey, sizeof(ckey));
+
+    uint64_t token_sequence = 0x1020304050607080ULL;
+
+    pomelo_challenge_token_t in;
+    memset(&in, 0, sizeof(in));
+    pomelo_random_buffer((uint8_t *) &in.client_id, sizeof(in.client_id));
+    pomelo_random_buffer(in.user_data, POMELO_USER_DATA_BYTES);
+
+    uint8_t buf[POMELO_CHALLENGE_TOKEN_BYTES];
+    pomelo_payload_t payload;
+    payload.data = buf;
+    payload.capacity = sizeof(buf);
+    payload.position = 0;
+
+    pomelo_check(
+        pomelo_codec_encrypt_challenge_token(
+            &payload, &in, ckey, token_sequence
+        ) == 0
+    );
+
+    // Flip one ciphertext byte in place, then decrypt with correct key+seq.
+    buf[0] ^= 0x01;
+
+    payload.position = 0;
+    pomelo_challenge_token_t out;
+    memset(&out, 0, sizeof(out));
+    pomelo_check(
+        pomelo_codec_decrypt_challenge_token(
+            &payload, &out, ckey, token_sequence
+        ) < 0
+    );
+    return 0;
+}
+
+
+static int test_challenge_token_rejects_wrong_sequence(void) {
+    pomelo_track_function();
+
+    uint8_t ckey[POMELO_KEY_BYTES];
+    pomelo_random_buffer(ckey, sizeof(ckey));
+
+    uint64_t token_sequence = 0x00000000DEADBEEFULL;
+
+    pomelo_challenge_token_t in;
+    memset(&in, 0, sizeof(in));
+    pomelo_random_buffer((uint8_t *) &in.client_id, sizeof(in.client_id));
+    pomelo_random_buffer(in.user_data, POMELO_USER_DATA_BYTES);
+
+    uint8_t buf[POMELO_CHALLENGE_TOKEN_BYTES];
+    pomelo_payload_t payload;
+    payload.data = buf;
+    payload.capacity = sizeof(buf);
+    payload.position = 0;
+
+    pomelo_check(
+        pomelo_codec_encrypt_challenge_token(
+            &payload, &in, ckey, token_sequence
+        ) == 0
+    );
+
+    // Decrypt with correct key but wrong sequence (wrong nonce) must reject.
+    payload.position = 0;
+    pomelo_challenge_token_t out;
+    memset(&out, 0, sizeof(out));
+    pomelo_check(
+        pomelo_codec_decrypt_challenge_token(
+            &payload, &out, ckey, token_sequence + 1
+        ) < 0
+    );
+    return 0;
+}
+
+
 static int test_checksum_blake2b(void) {
     pomelo_track_function();
 
@@ -385,6 +548,10 @@ int main(void) {
     pomelo_run_test(test_token_private_roundtrip);
     pomelo_run_test(test_aead_rejects_tampered);
     pomelo_run_test(test_token_private_rejects_tamper);
+    pomelo_run_test(test_challenge_token_roundtrip);
+    pomelo_run_test(test_challenge_token_rejects_wrong_key);
+    pomelo_run_test(test_challenge_token_rejects_tamper);
+    pomelo_run_test(test_challenge_token_rejects_wrong_sequence);
     pomelo_run_test(test_checksum_blake2b);
     pomelo_run_test(test_base64_roundtrip);
 
