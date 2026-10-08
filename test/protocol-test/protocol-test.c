@@ -50,6 +50,7 @@ static uint8_t connect_token[POMELO_CONNECT_TOKEN_BYTES];
 
 // Global variables
 static int connected_count;
+static volatile int received_count = 0;
 
 static uint64_t protocol_id;
 static int64_t client_id;
@@ -226,6 +227,7 @@ int main(void) {
     // Check memleak
     pomelo_check(alloc_bytes == pomelo_allocator_allocated_bytes(allocator));
     pomelo_check(connected_count == 2);
+    pomelo_check(received_count == 1);
 
     printf("Test passed!\n");
     return 0;
@@ -312,10 +314,11 @@ void pomelo_protocol_socket_on_received(
 
     if (socket == server) {
         printf("Server got %zu bytes from client\n", view->length);
-        // Echo the payload
+        // Echo the payload back to the client. Do NOT stop the sockets here:
+        // stopping the client synchronously would tear it down before the
+        // echo is delivered (the client's receive check would never run).
+        // Teardown is driven by the client's graceful disconnect below.
         pomelo_protocol_peer_send(peer, view, 1);
-        pomelo_protocol_socket_stop(client);
-        pomelo_protocol_socket_stop(server);
     } else {
         printf("Client got %zu bytes from server\n", view->length);
         int32_t v1 = 0;
@@ -333,8 +336,13 @@ void pomelo_protocol_socket_on_received(
         ret = pomelo_payload_read_uint64(&payload, &v2);
         pomelo_check(ret == 0);
         pomelo_check(v2 == sample_v2);
-        pomelo_protocol_peer_disconnect(peer);
-        printf("Disconnecting... It may take upto 1 second...\n");
+        received_count++;
+
+        // The echo round-trip is verified; tear down. Stopping here (after the
+        // client has received the echo) avoids the premature-teardown bug where
+        // the server stopped the client before the echo was delivered.
+        pomelo_protocol_socket_stop(client);
+        pomelo_protocol_socket_stop(server);
     }
 }
 

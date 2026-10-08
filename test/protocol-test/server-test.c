@@ -67,6 +67,8 @@ static int64_t client_id;
 static int32_t sample_v1;
 static uint64_t sample_v2;
 
+static volatile int server_completed = 0;
+
 
 /// @brief Encode, encrypt and dispatch the packet to client
 static void deliver_outgoing_packet(pomelo_protocol_packet_t * packet) {
@@ -394,6 +396,8 @@ void pomelo_protocol_socket_on_received(
     pomelo_check(ret == 0);
     pomelo_check(v2 == sample_v2);
 
+    server_completed = 1;
+
     // Disconnect peer
     printf("[i] Disconnecting peer...\n");
     pomelo_protocol_peer_disconnect(peer);
@@ -572,6 +576,7 @@ int main(void) {
     pomelo_buffer_context_destroy(buffer_ctx);
 
     // Check memleak
+    pomelo_check(server_completed == 1);
     pomelo_check(alloc_bytes == pomelo_allocator_allocated_bytes(allocator));
     printf("Test passed!\n");
     return 0;

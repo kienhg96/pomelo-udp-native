@@ -42,6 +42,8 @@ static bool connected_server;
 static size_t sent_counter = 0;
 static size_t recv_counter = 0;
 
+static volatile int exchange_done = 0;
+
 
 // Temp variables
 static pomelo_context_root_options_t context_options;
@@ -164,6 +166,7 @@ int main(void) {
     pomelo_test_platform_destroy(platform);
 
     // Check memleak
+    pomelo_check(exchange_done == 1);
     pomelo_check(alloc_bytes == pomelo_allocator_allocated_bytes(allocator));
     return 0;
 }
@@ -331,6 +334,8 @@ static void check_finished(void) {
         recv_counter
     );
     if (sent_counter < 2 || recv_counter < 2) return;
+
+    exchange_done = 1;
 
     printf("[i] Stopping client & server\n");
     pomelo_socket_stop(server);

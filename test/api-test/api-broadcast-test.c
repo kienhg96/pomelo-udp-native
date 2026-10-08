@@ -37,6 +37,9 @@ static size_t connected_counter = 0;
 static size_t recv_counter = 0;
 static size_t sent_counter = 0;
 
+static volatile int client_received[API_TEST_NCLIENTS] = {0};
+static volatile int distinct_received = 0;
+
 
 // Temp variables
 static pomelo_context_root_options_t context_options;
@@ -166,6 +169,8 @@ int main(void) {
     pomelo_test_platform_destroy(platform);
 
     // Check memleak
+    pomelo_check(distinct_received == API_TEST_NCLIENTS);
+    pomelo_check(connected_counter == API_TEST_NCLIENTS);
     pomelo_check(alloc_bytes == pomelo_allocator_allocated_bytes(allocator));
     return 0;
 }
@@ -199,8 +204,6 @@ void pomelo_client_on_received(
     pomelo_message_t * message
 ) {
     (void) session;
-    (void) client;
-    (void) message;
     pomelo_track_function();
 
     // Validate received message
@@ -208,6 +211,17 @@ void pomelo_client_on_received(
     int ret = pomelo_message_read_buffer(message, &value, 1);
     pomelo_check(ret == 0);
     pomelo_check(value == 12);
+
+    // Track distinct receiving clients (fan-out)
+    for (int i = 0; i < API_TEST_NCLIENTS; i++) {
+        if (client == clients[i]) {
+            if (!client_received[i]) {
+                client_received[i] = 1;
+                distinct_received++;
+            }
+            break;
+        }
+    }
 }
 
 
