@@ -352,6 +352,7 @@ if (POMELO_BUILD_TESTS)
     set(POMELO_TEST_PROTOCOL_CLIENT pomelo-test-protocol-client)
     set(POMELO_TEST_PROTOCOL_SERVER pomelo-test-protocol-server)
     set(POMELO_TEST_PROTOCOL_SERVER_DOS pomelo-test-protocol-server-dos)
+    set(POMELO_TEST_PROTOCOL_SERVER_REJECT pomelo-test-protocol-server-reject)
     set(POMELO_TEST_PROTOCOL_PACKET pomelo-test-protocol-packet)
     set(POMELO_TEST_DELIVERY_SINGLE pomelo-test-delivery-single)
     set(POMELO_TEST_DELIVERY_REORDER pomelo-test-delivery-reorder)
@@ -514,6 +515,29 @@ if (POMELO_BUILD_TESTS)
     )
     target_compile_options(${POMELO_TEST_PROTOCOL_SERVER_DOS} PRIVATE ${POMELO_COMPILE_FLAGS})
     target_compile_definitions(${POMELO_TEST_PROTOCOL_SERVER_DOS} PRIVATE)
+
+
+    # Test protocol: Server wrong-protocol REQUEST reject (anti-spoof)
+    set(SRC_TEST_PROTOCOL_SERVER_REJECT
+        ${SRC_ADAPTER_BASE}
+        test/protocol-test/adapter-simulator.c
+        test/protocol-test/adapter-simulator.h
+        test/protocol-test/server-reject-test.c
+    )
+    add_executable(${POMELO_TEST_PROTOCOL_SERVER_REJECT} ${SRC_TEST_PROTOCOL_SERVER_REJECT})
+    target_include_directories(${POMELO_TEST_PROTOCOL_SERVER_REJECT} PRIVATE ${POMELO_TEST_INCLUDE})
+    target_link_libraries(${POMELO_TEST_PROTOCOL_SERVER_REJECT} PRIVATE
+        ${POMELO_BASE}
+        ${POMELO_PROTOCOL}
+        ${POMELO_UTILS}
+        ${POMELO_PLATFORM_UV}
+        ${POMELO_CRYPTO}
+        ${POMELO_TEST_STATISTIC_CHECK}
+        ${LIB_SODIUM}
+        ${LIB_UV}
+    )
+    target_compile_options(${POMELO_TEST_PROTOCOL_SERVER_REJECT} PRIVATE ${POMELO_COMPILE_FLAGS})
+    target_compile_definitions(${POMELO_TEST_PROTOCOL_SERVER_REJECT} PRIVATE)
 
 
     # Test protocol: Packet
@@ -748,6 +772,7 @@ if (POMELO_BUILD_TESTS)
     add_test(NAME ${POMELO_TEST_PROTOCOL} COMMAND ${POMELO_TEST_PROTOCOL})
     add_test(NAME ${POMELO_TEST_PROTOCOL_SERVER} COMMAND ${POMELO_TEST_PROTOCOL_SERVER})
     add_test(NAME ${POMELO_TEST_PROTOCOL_SERVER_DOS} COMMAND ${POMELO_TEST_PROTOCOL_SERVER_DOS})
+    add_test(NAME ${POMELO_TEST_PROTOCOL_SERVER_REJECT} COMMAND ${POMELO_TEST_PROTOCOL_SERVER_REJECT})
     add_test(NAME ${POMELO_TEST_PROTOCOL_CLIENT} COMMAND ${POMELO_TEST_PROTOCOL_CLIENT})
     add_test(NAME ${POMELO_TEST_PROTOCOL_PACKET} COMMAND ${POMELO_TEST_PROTOCOL_PACKET})
     add_test(NAME ${POMELO_TEST_PROTOCOL_UNENCRYPTED} COMMAND ${POMELO_TEST_PROTOCOL_UNENCRYPTED})
