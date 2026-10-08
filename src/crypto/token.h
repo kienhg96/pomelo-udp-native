@@ -46,7 +46,7 @@ void pomelo_codec_decode_server_address(
 
 
 /// @brief Decode the array of server addresses
-void pomelo_codec_decode_server_addresses(
+int pomelo_codec_decode_server_addresses(
     pomelo_payload_t * payload,
     int * naddresses,
     pomelo_address_t * addresses

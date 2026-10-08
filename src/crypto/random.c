@@ -1,4 +1,5 @@
 #include <assert.h>
+#include <string.h>
 #include "pomelo/random.h"
 #include "sodium/randombytes.h"
 
@@ -17,13 +18,13 @@ void pomelo_random_buffer_deterministic(
     assert(buffer != NULL);
     if (length == 0) return; // Empty
 
-    seed = (seed >> 32) & (seed & 0xFFFFFFFFULL);
-
+    // Serialize the full 64-bit seed (big-endian) into a fully-zeroed
+    // seed array of randombytes_SEEDBYTES bytes.
     uint8_t seed_arr[randombytes_SEEDBYTES];
-    seed_arr[0] = (seed >> 24) & 0xFF;
-    seed_arr[1] = (seed >> 16) & 0xFF;
-    seed_arr[2] = (seed >> 8) & 0xFF;
-    seed_arr[3] = seed & 0xFF;
+    memset(seed_arr, 0, sizeof(seed_arr));
+    for (int i = 0; i < 8; ++i) {
+        seed_arr[i] = (uint8_t) ((seed >> (56 - i * 8)) & 0xFF);
+    }
 
     randombytes_buf_deterministic(buffer, length, seed_arr);
 }
