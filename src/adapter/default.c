@@ -213,6 +213,13 @@ void pomelo_adapter_recv_callback(
         return; // Make sure the adapter is running
     }
 
+    // The alloc callback may have failed to provide a buffer (pool exhausted /
+    // OOM). In that case libuv still invokes this callback with a NULL base and
+    // a negative nread. There is nothing to reconstruct or release.
+    if (!iovec->data) {
+        return;
+    }
+
     pomelo_buffer_t * buffer = pomelo_buffer_from_data(iovec->data);
     if (status == 0) {
         pomelo_buffer_view_t view;
