@@ -554,9 +554,9 @@ git commit -m "test(webrtc): register in CTest with pomelo_check (or remove dead
 
 ## P3 breadth — batch 2
 
-> **Status: IN PROGRESS (2026-10-08).** Tasks 19–22. Each subagent implements in a private build dir and does NOT commit; the parent verifies independently (git diff + rebuild in `build` + run + revert-proof) and commits locally. Plugin receive path stays MANUAL (browser client `../pomelo-udp-webrtc`) and is intentionally out of scope for automated CTest.
+> **Status: ✅ ALL DONE (2026-10-08, committed local).** Task 19 `17da97a`, Task 20 `8c0d9ce`, Task 21 `ed06795`, Task 22 `d88ba65`. Suite 17 → 19 tests (added `pomelo-test-delivery-reorder` + `pomelo-test-protocol-server-reject`), all green. Each subagent implemented in a private build dir and did NOT commit; the parent verified independently (git diff + rebuild in `build` + run + revert-proof) and committed locally. Plugin receive path stays MANUAL (browser client `../pomelo-udp-webrtc`) and is intentionally out of scope for automated CTest.
 
-### Task 19: Delivery out-of-order + duplicate fragment reassembly
+### Task 19: Delivery out-of-order + duplicate fragment reassembly — ✅ DONE (`17da97a`)
 
 **Files:**
 - Create: `test/delivery-test/delivery-reorder-test.c`
@@ -570,7 +570,7 @@ On `main` the parcel-level reorder buffer lives on the dev branch; the testable 
 - [ ] **Step 4 (revert-proof):** Comment the dedup guard `receiver.c:284` (`if (fragment->content.buffer) return;`), rebuild+run → the duplicate fragment double-increments `recv_fragments`, so the parcel either never completes or over-counts → test MUST fail. Restore.
 - [ ] **Step 5: Commit** `test(delivery): out-of-order + duplicate fragment reassembly`.
 
-### Task 20: Challenge-token codec roundtrip + negative paths
+### Task 20: Challenge-token codec roundtrip + negative paths — ✅ DONE (`8c0d9ce`)
 
 **Files:**
 - Modify: `test/crypto-test/crypto-test.c` (add tests + register in `main`)
@@ -583,7 +583,7 @@ On `main` the parcel-level reorder buffer lives on the dev branch; the testable 
 - [ ] **Step 4:** Build+run `pomelo-test-crypto`. Revert-proof: the AEAD/MAC is libsodium's; prove it is live by the positive roundtrip (Step 1) passing while all Step-2 negatives reject.
 - [ ] **Step 5: Commit** `test(crypto): challenge-token codec roundtrip + wrong-key/tamper/nonce rejection`.
 
-### Task 21: Server rejects spoofed REQUEST (protocol_id mismatch)
+### Task 21: Server rejects spoofed REQUEST (protocol_id mismatch) — ✅ DONE (`ed06795`)
 
 **Files:**
 - Create: `test/protocol-test/server-reject-test.c` (clone the `server-dos-test.c` harness)
@@ -597,7 +597,7 @@ On `main` the parcel-level reorder buffer lives on the dev branch; the testable 
 - [ ] **Step 4 (revert-proof):** Comment the `protocol_id != server->protocol_id` condition at `server.c:308` (leave only the `ret < 0` check), rebuild+run → wrong-protocol REQUESTs now allocate peers → peak > 0 → assert MUST fail. Restore.
 - [ ] **Step 5: Commit** `test(protocol): server drops spoofed REQUEST with wrong protocol_id`.
 
-### Task 22: Watchdog-timeout for integration drivers (hang → failure)
+### Task 22: Watchdog-timeout for integration drivers (hang → failure) — ✅ DONE (`d88ba65`)
 
 **Files:**
 - Modify: `test/api-test/api-basic-test.c`, `test/api-test/api-broadcast-test.c`, `test/protocol-test/protocol-test.c`
