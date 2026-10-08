@@ -8,6 +8,7 @@ set(CMAKE_C_STANDARD 11)
 option(POMELO_BUILD_TESTS "Build with tests" ON)
 option(POMELO_BUILD_EXAMPLES "Build with examples" ON)
 option(POMELO_BUILD_GENERATOR "Build generator" ON)
+option(POMELO_BUILD_SOAK "Build standalone soak/endurance tests (manual, not CTest)" OFF)
 
 
 # Modules
@@ -825,6 +826,15 @@ if (POMELO_BUILD_TESTS)
         )
     endif()
 
+    # Soak / endurance tests — standalone binaries, NOT registered with CTest.
+    # Build with -DPOMELO_BUILD_SOAK=ON and run manually.
+    if (POMELO_BUILD_SOAK)
+        set(POMELO_SOAK_DELIVERY pomelo-soak-delivery)
+        set(POMELO_SOAK_PROTOCOL pomelo-soak-protocol)
+        set(POMELO_SOAK_API      pomelo-soak-api)
+        set(POMELO_SOAK_ENGINE   pomelo-soak-engine)
+        # Target blocks are appended by later tasks.
+    endif() # POMELO_BUILD_SOAK
 endif() # POMELO_BUILD_TESTS
 
 
