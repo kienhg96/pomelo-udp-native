@@ -58,7 +58,46 @@ static int pomelo_test_platform_bind_fail(void) {
     return 0;
 }
 
+// Regression test for N3 (REVIEW.md section 6): the server socket is bound
+// without UV_UDP_REUSEADDR, so binding an address that is already in use must
+// fail (EADDRINUSE) instead of silently sharing the port. Closing the socket
+// must free the port immediately (UDP has no TIME_WAIT).
+static int pomelo_test_platform_bind_in_use(void) {
+    pomelo_allocator_t * allocator = pomelo_allocator_default();
+    uint64_t alloc_bytes = pomelo_allocator_allocated_bytes(allocator);
+    shutdown_done = false;
+
+    platform = pomelo_test_platform_create(allocator);
+    pomelo_check(platform != NULL);
+
+    pomelo_address_t addr;
+    pomelo_check(pomelo_address_from_string(&addr, "127.0.0.1:19998") == 0);
+
+    pomelo_platform_handle_t first;
+    pomelo_platform_handle_t second;
+    pomelo_check(pomelo_platform_udp_bind(platform, &addr, &first) == 0);
+
+    // Port is in use -> the second bind must fail
+    pomelo_check(pomelo_platform_udp_bind(platform, &addr, &second) != 0);
+
+    // After stopping the first socket, the port can be bound again right away
+    pomelo_platform_udp_stop(platform, &first);
+    pomelo_check(pomelo_platform_udp_bind(platform, &addr, &second) == 0);
+    pomelo_platform_udp_stop(platform, &second);
+
+    pomelo_check(pomelo_platform_close(platform, shutdown_callback) == 0);
+    pomelo_test_platform_run(platform);
+
+    pomelo_check(uv_loop_close(uv_default_loop()) == 0);
+    pomelo_test_platform_destroy(platform);
+
+    pomelo_check(shutdown_done == true);
+    pomelo_check(pomelo_allocator_allocated_bytes(allocator) == alloc_bytes);
+    return 0;
+}
+
 int main(void) {
     pomelo_run_test(pomelo_test_platform_bind_fail);
+    pomelo_run_test(pomelo_test_platform_bind_in_use);
     return 0;
 }

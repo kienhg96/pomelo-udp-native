@@ -11,7 +11,7 @@
 | 3 | Protocol | `src/protocol/` | ✅ |
 | 4 | Delivery | `src/delivery/` | ✅ |
 | 5 | API | `src/api/`, `include/pomelo/api.h` | ✅ |
-| 6 | Bug báo về từ pomelo-udp-node | `src/platform/uv/udp.c`, `src/api/context.c` | N1 ✅ đã vá · N2 ✅ đã vá |
+| 6 | Bug báo về từ pomelo-udp-node | `src/platform/uv/udp.c`, `src/api/context.c` | N1 ✅ đã vá · N2 ✅ đã vá · N3 ✅ đã vá |
 
 ---
 
@@ -201,7 +201,7 @@ Truyền `NULL` cho `bin_len` → caller không biết số byte thực giải m
 
 ---
 
-## 6. Bug phát hiện từ binding Node (pomelo-udp-node)  ✅ (N1 + N2 đã vá)
+## 6. Bug phát hiện từ binding Node (pomelo-udp-node)  ✅ (N1 + N2 + N3 đã vá)
 
 > Nguồn: test suite của `../pomelo-udp-node` (2026-10-08), submodule trỏ tới commit `f16bf3b` của repo này.
 > Cả 2 đều tái hiện được qua binding Node; **chưa** có test C tương ứng ở đây. Phần "nguyên nhân" của N2 là giả thuyết từ backtrace, cần agent xác nhận.
@@ -226,6 +226,13 @@ Truyền `NULL` cho `bin_len` → caller không biết số byte thực giải m
 - **Lưu ý:** binding Node đã có async cleanup hook ở platform-uv để đóng handle khi teardown, nhưng **không** thể chờ socket stop bất đồng bộ trước khi destroy context → cần native chịu được destroy khi còn session.
 - **✅ Đã xác nhận + vá:** đúng là chuỗi `builtin_session_pool` destroy → `pomelo_session_builtin_cleanup` → `endpoint_stop` (chạy **đồng bộ** qua sequencer) → `bus_stop` → `dispatcher_cancel` → `sender_complete` → `pomelo_delivery_sender_on_result` → `pomelo_socket_dispatch_send_result` → `pomelo_message_ref()` trên message **đã bị `message_pool` free** (và deref socket đã bị `socket_pool` free). Fix: **đảo thứ tự huỷ** trong `pomelo_context_root_destroy` — huỷ session pool (builtin+plugin) → channel pool → rồi mới `socket_pool`/`message_pool` → protocol/delivery/buffer context → plugin manager. Nhờ vậy lúc session flush các send dở thì socket + message còn sống (vá luôn cả hazard socket-use-after-free). Session cleanup giải phóng channel về channel pool nên session phải huỷ trước channel.
 - **Repro C (deterministic, đã vào CTest):** `test/api-test/api-destroy-inflight-test.c` (`pomelo-test-api-destroy-inflight`) — connect client↔server loopback, gửi 1 message RELIABLE rồi `uv_stop` (ACK chưa về → in-flight), gọi thẳng `pomelo_context_destroy` không stop socket. **Đỏ trước fix 6/6** (abort `ref.c:23`, exit 134), **xanh sau fix 8/8** (no abort, no leak). Full CTest 21/21 PASS.
+
+**✅ FIXED (Medium) — N3: server bind với `UV_UDP_REUSEADDR` → bind trùng port không báo lỗi**
+`src/platform/uv/udp.c:153` (`pomelo_platform_uv_udp_bind`)
+- **Triệu chứng:** 2 process (hoặc 2 socket) `listen` cùng `ip:port` đều thành công; kernel chỉ giao datagram unicast cho một socket → server kia "câm", client connect/gửi treo. Phát hiện khi test suite của binding Node bị treo do đụng port với process chạy song song (2026-10-09). Tái hiện qua binding: 2 process cùng `listen("127.0.0.1:19950")` → cả 2 resolve.
+- **Nguyên nhân:** libuv map `UV_UDP_REUSEADDR` thành `SO_REUSEPORT` (BSD/macOS) / `SO_REUSEADDR` (Linux, Windows). Trên Windows còn tệ hơn: `SO_REUSEADDR` cho phép bind đè cả socket không set cờ (port hijack). Cờ này không cần cho restart nhanh: UDP không có `TIME_WAIT` — đã kiểm chứng trên macOS: rebind ngay sau khi process cũ thoát / bị `kill -9` / sau `close()` trong cùng process đều OK; chỉ fail khi process cũ còn sống (đúng hành vi mong muốn). Linux/Windows: suy từ tài liệu, chưa chạy thực tế.
+- **✅ Đã vá:** bind server với flags `0`. Bind trùng → `EADDRINUSE` → `pomelo_platform_udp_bind` trả lỗi → `pomelo_socket_listen` thất bại. Nếu sau này cần nhiều process share 1 port (load-balance) thì thêm option riêng dùng `UV_UDP_REUSEPORT`, mặc định tắt.
+- **Regression test:** thêm `pomelo_test_platform_bind_in_use` vào `test/platform-test/platform-bind-fail-test.c`: bind `127.0.0.1:19998` → bind lần 2 phải fail → `udp_stop` → bind lại ngay phải OK → no leak. **Đỏ trước fix** (fail `platform-bind-fail-test.c:81`), **xanh sau fix**. Full CTest 21/21 PASS.
 
 ---
 

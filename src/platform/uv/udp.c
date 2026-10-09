@@ -150,7 +150,12 @@ int pomelo_platform_uv_udp_bind(
     int send_buf_size = POMELO_SERVER_SOCKET_SNDBUF_SIZE;
     int recv_buf_size = POMELO_SERVER_SOCKET_RCVBUF_SIZE;
 
-    if (uv_udp_bind(udp, (struct sockaddr *) &addr, UV_UDP_REUSEADDR) < 0) {
+    // No UV_UDP_REUSEADDR: UDP has no TIME_WAIT, so a restarted server can bind
+    // the port again as soon as the previous socket is closed. With the flag a
+    // second server on the same address would bind silently (SO_REUSEPORT on
+    // BSD/macOS, SO_REUSEADDR on Linux/Windows - on Windows even over a socket
+    // that did not set it) and steal datagrams. See REVIEW.md section 6 (N3).
+    if (uv_udp_bind(udp, (struct sockaddr *) &addr, 0) < 0) {
         pomelo_platform_uv_udp_close(socket);
         return -1;
     }

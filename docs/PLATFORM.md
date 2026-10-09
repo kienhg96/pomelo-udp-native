@@ -49,7 +49,7 @@ re-checks `handle->type` before dereferencing — a stale handle is a no-op, not
 `_create`/`_destroy`/`_close`/`_on_closed`/`_statistic`.
 
 **UDP** (`src/platform/uv/udp.c`, callbacks run on **loop thread**):
-- `pomelo_platform_uv_udp_bind` — `udp.c:123` (server: `uv_udp_bind` + `recv_start`)
+- `pomelo_platform_uv_udp_bind` — `udp.c:123` (server: `uv_udp_bind` + `recv_start`; bound **without** `UV_UDP_REUSEADDR`, so an address already in use fails with `EADDRINUSE` — UDP has no `TIME_WAIT`, a stopped port is reusable immediately; see REVIEW.md §6 N3)
 - `pomelo_platform_uv_udp_connect` — `udp.c:189` (client; falls back to bind+stored `target_addr` when `uv_udp_connect` unavailable < libuv 1.27)
 - `pomelo_platform_uv_udp_stop` — `udp.c:270`
 - `pomelo_platform_uv_udp_send` — `udp.c:299` (asserts `0 < niovec <= MAX_NUMBER_BUF_VECTORS` at `:311-312`; fills at most 2 `uv_buf_t`)
