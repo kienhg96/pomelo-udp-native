@@ -11,6 +11,7 @@
 | 3 | Protocol | `src/protocol/` | ✅ |
 | 4 | Delivery | `src/delivery/` | ✅ |
 | 5 | API | `src/api/`, `include/pomelo/api.h` | ✅ |
+| 6 | Bug báo về từ pomelo-udp-node | `src/platform/uv/udp.c`, `src/api/context.c` | N1 ✅ đã vá · N2 ☐ chưa điều tra |
 
 ---
 
@@ -197,6 +198,32 @@ Truyền `NULL` cho `bin_len` → caller không biết số byte thực giải m
 - **Stale-session guard thông minh**: `session_send` kiểm atomic `signature == 0` để phát hiện session đã release (caller giữ handle cũ) → dispatch failure thay vì UAF (`session.c:53-57`).
 - **List iterator fail-fast** (`mod_count`) → sửa list giữa iteration bị bắt ngay, không corrupt âm thầm.
 - Mọi thao tác chạy trên loop thread + sequencer tuần tự hoá → các nghi vấn "race" (signature-check vs send, v.v.) là **false positive**.
+
+---
+
+## 6. Bug phát hiện từ binding Node (pomelo-udp-node)  ☐ (chưa điều tra / chưa vá)
+
+> Nguồn: test suite của `../pomelo-udp-node` (2026-10-08), submodule trỏ tới commit `f16bf3b` của repo này.
+> Cả 2 đều tái hiện được qua binding Node; **chưa** có test C tương ứng ở đây. Phần "nguyên nhân" của N2 là giả thuyết từ backtrace, cần agent xác nhận.
+
+### Findings
+
+**✅ FIXED (High) — N1: `udp_bind` lỗi → abort ở `pomelo_platform_uv_udp_on_closed`**
+`src/platform/uv/udp.c:153` + `:494`
+- **Luồng lỗi:** `pomelo_platform_uv_udp_bind` acquire socket từ pool → `uv_udp_bind(...)` thất bại (vd. địa chỉ không thuộc máy → `EADDRNOTAVAIL`) → gọi `pomelo_platform_uv_udp_close(socket)` **trước khi** `socket->entry = pomelo_list_push_back(manager->sockets, socket)` (dòng ~170). Close callback `pomelo_platform_uv_udp_on_closed` gọi `pomelo_list_remove(manager->sockets, socket->entry)` với `entry == NULL` → `assert(entry != NULL)` (`src/utils/list.c:419`) → **SIGABRT**; build bỏ assert thì deref NULL.
+- **Cùng pattern:** nhánh `uv_udp_recv_start` lỗi (dòng ~163) cũng close trước khi push. Nên kiểm tra luôn `pomelo_platform_uv_udp_connect` (dòng ~224) và các nhánh lỗi tương tự.
+- **Repro (qua binding):** `socket.listen(key, 1, 4, "203.0.113.1:19999")` → promise reject "Failed to listen" → vòng loop kế tiếp abort. Backtrace: `uv_run → pomelo_platform_uv_udp_on_closed (udp.c:494) → pomelo_list_remove(entry=NULL)`.
+- **Hướng fix:** trong `on_closed` chỉ `pomelo_list_remove` khi `socket->entry != NULL` (và set lại `entry = NULL` sau khi remove); hoặc push vào list trước khi có thể close. Kiểm tra thêm `pomelo_platform_uv_udp_mgr_check_closed` không bị gọi sai khi socket chưa từng nằm trong list. Thêm regression test bind vào địa chỉ không bind được.
+- **✅ Đã vá:** `pomelo_platform_uv_udp_on_closed` giờ chỉ `pomelo_list_remove` khi `socket->entry != NULL` rồi set `entry = NULL` (socket pool là `zero_init` nên `entry` chắc chắn NULL ở đường lỗi bind/connect). Fix nằm ở `on_closed` — sink chung của cả 3 call-site (bind/`uv_udp_bind`, bind/`uv_udp_recv_start`, connect). Regression test C: `test/platform-test/platform-bind-fail-test.c` (`pomelo-test-platform-bind-fail`, đã vào CTest) — bind `203.0.113.1:19999` (TEST-NET-3 → `EADDRNOTAVAIL`): **đỏ trước fix** (abort `list.c:419`, exit 134), **xanh sau fix** (5/5, no leak). Full CTest 20/20 PASS.
+
+**🟠 High — N2: thứ tự huỷ trong `pomelo_context_root_destroy` → "Try to ref finalized reference"**
+`src/api/context.c:231` (`pomelo_context_root_destroy`)
+- **Triệu chứng:** `Assertion failed: (false && "Try to ref finalized reference"), function pomelo_reference_ref, file ref.c, line 23` khi huỷ context lúc vẫn còn session đang có message gửi dở.
+- **Thứ tự hiện tại:** `socket_pool` → **`message_pool`** → `builtin_session_pool` → `builtin_channel_pool` → `plugin_*_pool` → protocol/delivery/buffer context → plugin manager.
+- **Giả thuyết (từ backtrace của binding):** cleanup của session/channel builtin (khi destroy `builtin_session_pool`) huỷ các transmission/parcel còn treo → đi tới `pomelo_socket_dispatch_send_result` (vd. `src/api/builtin/delivery.c:97` hoặc `src/api/builtin/channel.c:115/125`) → `pomelo_message_ref` trên message mà `message_pool` đã finalize/free trước đó.
+- **Repro (qua binding, không ổn định ~2/6 lần):** trong `worker_thread`, mở server + client, gửi message liên tục mỗi 1 ms, rồi `worker.terminate()` từ main thread. Env teardown → binding gọi `pomelo_context_destroy` khi socket vẫn đang chạy.
+- **Hướng fix (cần agent xác nhận):** huỷ `message_pool` **sau** các pool session/channel (và sau delivery context nếu parcel giữ message); hoặc đảm bảo destroy socket/session flush send-result trước. Viết test C: context có session đang gửi (reliable, chưa ACK) → `pomelo_context_destroy` không assert, không leak.
+- **Lưu ý:** binding Node đã có async cleanup hook ở platform-uv để đóng handle khi teardown, nhưng **không** thể chờ socket stop bất đồng bộ trước khi destroy context → cần native chịu được destroy khi còn session.
 
 ---
 

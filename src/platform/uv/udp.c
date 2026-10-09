@@ -491,7 +491,14 @@ void pomelo_platform_uv_udp_on_closed(uv_udp_t * udp) {
     pomelo_platform_uv_udp_t * socket = udp->data;
     pomelo_platform_uv_udp_mgr_t * manager = socket->manager;
 
-    pomelo_list_remove(manager->sockets, socket->entry);
+    // socket->entry is NULL when the socket was closed on an error path of
+    // pomelo_platform_uv_udp_bind / _connect before it was pushed onto
+    // manager->sockets (the socket pool is zero_init, so entry is reliably
+    // NULL in that case). Only unlink a socket that is actually tracked.
+    if (socket->entry) {
+        pomelo_list_remove(manager->sockets, socket->entry);
+        socket->entry = NULL;
+    }
     pomelo_pool_release(manager->socket_pool, socket);
 
     pomelo_platform_uv_udp_mgr_check_closed(manager);

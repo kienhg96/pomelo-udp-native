@@ -348,6 +348,7 @@ if (POMELO_BUILD_TESTS)
     set(POMELO_TEST_BASE pomelo-test-base)
     set(POMELO_TEST_CRYPTO pomelo-test-crypto)
     set(POMELO_TEST_PLATFORM_UV pomelo-test-platform-uv)
+    set(POMELO_TEST_PLATFORM_BIND_FAIL pomelo-test-platform-bind-fail)
     set(POMELO_TEST_PROTOCOL pomelo-test-protocol)
     set(POMELO_TEST_PROTOCOL_UNENCRYPTED pomelo-test-protocol-unencrypted)
     set(POMELO_TEST_PROTOCOL_CLIENT pomelo-test-protocol-client)
@@ -447,6 +448,22 @@ if (POMELO_BUILD_TESTS)
         ${LIB_UV}
     )
     target_compile_options(${POMELO_TEST_PLATFORM_UV} PRIVATE ${POMELO_COMPILE_FLAGS})
+
+
+    # Test Platform UV: bind-failure regression (N1, REVIEW.md §6)
+    set(SRC_TEST_PLATFORM_BIND_FAIL
+        test/platform-test/platform-bind-fail-test.c
+        test/platform-test/platform-uv.c
+    )
+    add_executable(${POMELO_TEST_PLATFORM_BIND_FAIL} ${SRC_TEST_PLATFORM_BIND_FAIL})
+    target_include_directories(${POMELO_TEST_PLATFORM_BIND_FAIL} PRIVATE ${POMELO_TEST_INCLUDE})
+    target_link_libraries(${POMELO_TEST_PLATFORM_BIND_FAIL} PRIVATE
+        ${POMELO_UTILS}
+        ${POMELO_BASE}
+        ${POMELO_PLATFORM_UV}
+        ${LIB_UV}
+    )
+    target_compile_options(${POMELO_TEST_PLATFORM_BIND_FAIL} PRIVATE ${POMELO_COMPILE_FLAGS})
 
 
     # Test protocol: Client
@@ -769,6 +786,7 @@ if (POMELO_BUILD_TESTS)
     add_test(NAME ${POMELO_TEST_UTILS} COMMAND ${POMELO_TEST_UTILS})
     add_test(NAME ${POMELO_TEST_CRYPTO} COMMAND ${POMELO_TEST_CRYPTO})
     add_test(NAME ${POMELO_TEST_PLATFORM_UV} COMMAND ${POMELO_TEST_PLATFORM_UV})
+    add_test(NAME ${POMELO_TEST_PLATFORM_BIND_FAIL} COMMAND ${POMELO_TEST_PLATFORM_BIND_FAIL})
 
     add_test(NAME ${POMELO_TEST_PROTOCOL} COMMAND ${POMELO_TEST_PROTOCOL})
     add_test(NAME ${POMELO_TEST_PROTOCOL_SERVER} COMMAND ${POMELO_TEST_PROTOCOL_SERVER})
