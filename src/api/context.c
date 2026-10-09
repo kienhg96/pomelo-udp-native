@@ -232,6 +232,40 @@ void pomelo_context_root_destroy(pomelo_context_root_t * context) {
     assert(context != NULL);
     pomelo_context_t * base = &context->base;
 
+    // Destroy order matters when the context is torn down abruptly while a
+    // session still has an in-flight (reliable, not-yet-ACKed) message, e.g. a
+    // binding calling pomelo_context_destroy without a graceful socket stop.
+    //
+    // Destroying a session pool runs pomelo_session_*_cleanup synchronously,
+    // which stops the delivery endpoint; the stop cancels the parked reliable
+    // dispatcher, which still reports a send result back through
+    // pomelo_socket_dispatch_send_result -> pomelo_message_ref() on the message
+    // and dereferences the owning socket. So the session (and channel) pools
+    // must be destroyed BEFORE socket_pool and message_pool, while the socket
+    // and message memory are still alive; otherwise the flush touches freed
+    // objects ("Try to ref finalized reference", ref.c). Session cleanup also
+    // releases channels back to the channel pools, so sessions come before
+    // channels. See REVIEW.md section 6 (N2).
+    if (base->builtin_session_pool) {
+        pomelo_pool_destroy(base->builtin_session_pool);
+        base->builtin_session_pool = NULL;
+    }
+
+    if (base->plugin_session_pool) {
+        pomelo_pool_destroy(base->plugin_session_pool);
+        base->plugin_session_pool = NULL;
+    }
+
+    if (base->builtin_channel_pool) {
+        pomelo_pool_destroy(base->builtin_channel_pool);
+        base->builtin_channel_pool = NULL;
+    }
+
+    if (base->plugin_channel_pool) {
+        pomelo_pool_destroy(base->plugin_channel_pool);
+        base->plugin_channel_pool = NULL;
+    }
+
     if (base->socket_pool) {
         pomelo_pool_destroy(base->socket_pool);
         base->socket_pool = NULL;
@@ -240,26 +274,6 @@ void pomelo_context_root_destroy(pomelo_context_root_t * context) {
     if (context->message_pool) {
         pomelo_pool_destroy(context->message_pool);
         context->message_pool = NULL;
-    }
-
-    if (base->builtin_session_pool) {
-        pomelo_pool_destroy(base->builtin_session_pool);
-        base->builtin_session_pool = NULL;
-    }
-
-    if (base->builtin_channel_pool) {
-        pomelo_pool_destroy(base->builtin_channel_pool);
-        base->builtin_channel_pool = NULL;
-    }
-
-    if (base->plugin_session_pool) {
-        pomelo_pool_destroy(base->plugin_session_pool);
-        base->plugin_session_pool = NULL;
-    }
-
-    if (base->plugin_channel_pool) {
-        pomelo_pool_destroy(base->plugin_channel_pool);
-        base->plugin_channel_pool = NULL;
     }
 
     if (base->protocol_context) {
