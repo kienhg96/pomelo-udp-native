@@ -209,6 +209,10 @@ void pomelo_platform_uv_cancel_worker_task(
 );
 
 
+/// @brief Drain all in-flight worker tasks (cancel + pump loop until none left)
+void pomelo_platform_uv_drain_worker_tasks(pomelo_platform_uv_t * platform);
+
+
 /* -------------------------------------------------------------------------- */
 /*                              Private APIs                                  */
 /* -------------------------------------------------------------------------- */

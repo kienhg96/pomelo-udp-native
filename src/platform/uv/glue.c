@@ -200,3 +200,8 @@ void pomelo_platform_cancel_worker_task(
         task_handle
     );
 }
+
+
+void pomelo_platform_drain_worker_tasks(pomelo_platform_t * platform) {
+    pomelo_platform_uv_drain_worker_tasks((pomelo_platform_uv_t *) platform);
+}

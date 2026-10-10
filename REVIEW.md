@@ -11,7 +11,7 @@
 | 3 | Protocol | `src/protocol/` | ✅ |
 | 4 | Delivery | `src/delivery/` | ✅ |
 | 5 | API | `src/api/`, `include/pomelo/api.h` | ✅ |
-| 6 | Bug báo về từ pomelo-udp-node | `src/platform/uv/udp.c`, `src/api/context.c` | N1 ✅ đã vá · N2 ✅ đã vá · N3 ✅ đã vá |
+| 6 | Bug báo về từ pomelo-udp-node | `src/platform/uv/udp.c`, `src/api/context.c`, `src/api/socket.c`, `src/platform/uv/worker.c` | N1 ✅ · N2 ✅ · N3 ✅ · N4 ✅ đã vá |
 
 ---
 
@@ -201,7 +201,7 @@ Truyền `NULL` cho `bin_len` → caller không biết số byte thực giải m
 
 ---
 
-## 6. Bug phát hiện từ binding Node (pomelo-udp-node)  (N1 + N2 + N3 ✅ đã vá · N4 ☐ chưa vá)
+## 6. Bug phát hiện từ binding Node (pomelo-udp-node)  (N1 + N2 + N3 + N4 ✅ đã vá)
 
 > Nguồn: test suite của `../pomelo-udp-node` (2026-10-08), submodule trỏ tới commit `f16bf3b` của repo này.
 > Cả 2 đều tái hiện được qua binding Node; **chưa** có test C tương ứng ở đây. Phần "nguyên nhân" của N2 là giả thuyết từ backtrace, cần agent xác nhận.
@@ -234,12 +234,14 @@ Truyền `NULL` cho `bin_len` → caller không biết số byte thực giải m
 - **✅ Đã vá:** bind server với flags `0`. Bind trùng → `EADDRINUSE` → `pomelo_platform_udp_bind` trả lỗi → `pomelo_socket_listen` thất bại. Nếu sau này cần nhiều process share 1 port (load-balance) thì thêm option riêng dùng `UV_UDP_REUSEPORT`, mặc định tắt.
 - **Regression test:** thêm `pomelo_test_platform_bind_in_use` vào `test/platform-test/platform-bind-fail-test.c`: bind `127.0.0.1:19998` → bind lần 2 phải fail → `udp_stop` → bind lại ngay phải OK → no leak. **Đỏ trước fix** (fail `platform-bind-fail-test.c:81`), **xanh sau fix**. Full CTest 21/21 PASS.
 
-**☐ CHƯA VÁ (Medium — robustness/DoS) — N4: `assert(packet != NULL)` khi cạn packet pool**
-`src/protocol/packet.c:629` (`pomelo_protocol_packet_header_init`)
-- **Triệu chứng:** `Assertion failed: (packet != NULL), function pomelo_protocol_packet_header_init, file packet.c, line 629` → SIGABRT (exit 134). Assert bật cả ở Release của node-gyp (không định nghĩa `NDEBUG`).
-- **Luồng (giả thuyết, cần xác nhận):** dưới tải gửi cực cao, packet pool cạn → một `pomelo_protocol_sender_t` được tạo/submit với `sender->packet == NULL` (acquire packet trả NULL không được chặn ở thượng nguồn) → `sender_process_entry` (chạy trên worker threadpool) gọi `pomelo_protocol_packet_header_init(&header, sender->packet=NULL)` → assert. Tức là path tạo/submit sender không kiểm tra NULL packet trước khi đẩy lên worker.
-- **Repro (qua binding Node):** 8 `worker_thread` **đồng thời**, mỗi worker server↔client loopback bơm **burst 20 message RELIABLE/ms mỗi chiều** (`socket.send` / `session.send` kênh 0) rồi bị `worker.terminate()`. Tái hiện SIGABRT `packet.c:629` sau vài chục iteration. Không tái hiện ở tải thấp / 1 worker.
-- **Hướng fix:** xử lý packet pool cạn một cách mềm — khi acquire packet trả NULL thì sender đánh dấu FAILED và đi `pomelo_pipeline_finish` (như nhánh lỗi submit worker đã có ở `sender.c:210-215`), **trước khi** submit lên worker; hoặc guard `sender_process_entry` khi `packet == NULL`. Không nên assert trên điều kiện do tải ngoài kiểm soát (đây là vector DoS: flood gửi làm cạn pool → abort). Viết test C: ép packet pool nhỏ + gửi vượt capacity → không abort, trả lỗi gửi.
+**✅ FIXED (High — teardown use-after-free race) — N4: worker entry chạy trên sender đã bị free lúc destroy đột ngột**
+`src/protocol/packet.c:629` (`pomelo_protocol_packet_header_init`) / `src/protocol/sender.c:218` (`sender_process_entry`)
+- **Triệu chứng:** `Assertion failed: (packet != NULL), ... packet.c, line 629` → SIGABRT (exit 134); tuỳ timing cũng có thể abort `(chunk != NULL) ... sender.c:218` hoặc SIGSEGV (139). Assert bật cả ở Release của node-gyp (không định nghĩa `NDEBUG`).
+- **⚠️ Nguyên nhân ban đầu đoán SAI ("cạn packet pool"):** đã bác bỏ. Cả 9 call-site acquire packet ở protocol layer **đều guard NULL** và `socket_dispatch` còn `assert(packet != NULL)` (socket.c:630) ⇒ packet không thể NULL lúc submit do pool cạn; `sender_pool` là root pool **tự lớn, không cap** (context.c:157). NULL chỉ xuất hiện do **free tranh chấp với worker entry**.
+- **Nguyên nhân thật (đã xác nhận bằng trace + đọc code):** trên socket có mã hoá, **mọi** packet gửi đi được mã hoá trên **worker threadpool** (`sender_process` → `submit_worker_task`, sender.c:202). Khi `pomelo_context_destroy` chạy mà **không** stop socket graceful: `pomelo_socket_cleanup` → `pomelo_protocol_socket_destroy` **chỉ** release client/server về pool (client.c:152), **không bao giờ** gọi `client_stop`/`server_stop` → `pomelo_protocol_peer_cancel_senders_and_receivers` (peer.c:199) không chạy → senders không bị cancel. Rồi `protocol_context` huỷ `sender_pool` → `pool_root_destroy` chạy `sender_cleanup` (NULL hoá `sender->packet`, sender.c:103) rồi **free backing vô điều kiện** (pool.c:174; `sender_pool` là `zero_init`). Trong khi đó một threadpool thread vẫn đang trong `sender_process_entry` đọc `sender->packet`/`view.buffer` → vùng nhớ đã free/zero → NULL → abort. `uv_cancel` không chặn được task đã chạy (worker.c:234) và platform teardown **không drain/join** threadpool (worker.c:53-69); **không hề có** mutex/refcount/barrier giữa loop-thread (free) và threadpool-thread (entry).
+- **Repro (qua binding Node):** 8 `worker_thread` đồng thời, mỗi worker server↔client loopback bơm burst 20 message RELIABLE/ms mỗi chiều rồi `worker.terminate()` → SIGABRT sau vài chục iteration; không tái hiện ở tải thấp / 1 worker.
+- **✅ Đã vá (drain đúng gốc):** ở luồng bình thường mỗi sender chỉ được free trong `done→complete→sender_complete` của **chính nó** (loop thread, SAU entry) → tự đồng bộ an toàn; chỉ `pool_root_destroy` phá vỡ quy tắc đó. Fix: thêm API platform `pomelo_platform_drain_worker_tasks` (cancel mọi task rồi **bơm loop tới khi threadpool rỗng**); `pomelo_socket_cleanup` giờ **stop protocol socket** (cancel senders + dừng adapter recv) rồi **drain** trước khi `pomelo_protocol_socket_destroy` — nên mọi sender được giải phóng qua completion của nó khi socket+buffer còn sống, KHÔNG còn entry nào chạm vùng nhớ đã free. Graceful path không đổi (ở đó `protocol_socket` đã NULL khi cleanup chạy). **Lưu ý:** drain chạy `uv_run` nên phải gọi từ NGOÀI loop (đúng với teardown đồng bộ).
+- **Repro C (reliable red):** `test/api-test/api-destroy-inflight-worker-test.c` (`pomelo-test-api-destroy-inflight-worker`, đã vào CTest) — connect loopback mã hoá, burst 4000 message UNRELIABLE 4000-byte (mỗi cái → PAYLOAD sender + worker encrypt task), rồi `pomelo_context_destroy` đột ngột khi task còn in-flight. **Đỏ trước fix 6/6** (abort `sender.c:218`/`packet.c:629`, exit 134/139); **xanh sau fix 20/20** (no abort, no leak). Revert-proof: giữ `stop` mà bỏ `drain` → **vẫn đỏ 6/6** ⇒ drain là thành phần vá thiết yếu. Full CTest 22/22 PASS; test teardown graceful (api-basic/broadcast/plugin) + N2 vẫn xanh.
 - **Nguồn:** phát hiện khi hunt T3 bên binding (2026-10-10). Submodule tại thời điểm này: `86cbc0a`.
 
 ---

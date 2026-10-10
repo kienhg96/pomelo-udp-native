@@ -362,6 +362,7 @@ if (POMELO_BUILD_TESTS)
     set(POMELO_TEST_DELIVERY_MULTIPLE pomelo-test-delivery-multiple)
     set(POMELO_TEST_API_BASIC pomelo-test-api-basic)
     set(POMELO_TEST_API_DESTROY_INFLIGHT pomelo-test-api-destroy-inflight)
+    set(POMELO_TEST_API_DESTROY_INFLIGHT_WORKER pomelo-test-api-destroy-inflight-worker)
     set(POMELO_TEST_API_BROADCAST pomelo-test-api-broadcast)
     set(POMELO_TEST_PLUGIN pomelo-test-plugin)
     set(POMELO_TEST_DEMO_PLUGIN pomelo-test-demo-plugin)
@@ -730,6 +731,28 @@ if (POMELO_BUILD_TESTS)
     )
     target_compile_options(${POMELO_TEST_API_DESTROY_INFLIGHT} PRIVATE ${POMELO_COMPILE_FLAGS})
 
+    # Test API: destroy-with-inflight crypto worker tasks (N4, REVIEW.md section 6)
+    set(SRC_TEST_API_DESTROY_INFLIGHT_WORKER
+        test/api-test/api-destroy-inflight-worker-test.c
+        test/platform-test/platform-uv.c
+    )
+    add_executable(${POMELO_TEST_API_DESTROY_INFLIGHT_WORKER} ${SRC_TEST_API_DESTROY_INFLIGHT_WORKER})
+    target_include_directories(${POMELO_TEST_API_DESTROY_INFLIGHT_WORKER} PRIVATE ${POMELO_TEST_INCLUDE})
+    target_link_libraries(${POMELO_TEST_API_DESTROY_INFLIGHT_WORKER} PRIVATE
+        ${POMELO_BASE}
+        ${POMELO_PROTOCOL}
+        ${POMELO_UTILS}
+        ${POMELO_PLATFORM_UV}
+        ${POMELO_CRYPTO}
+        ${POMELO_DELIVERY}
+        ${POMELO_API}
+        ${POMELO_ADAPTER_DEFAULT}
+        ${POMELO_TEST_STATISTIC_CHECK}
+        ${LIB_UV}
+        ${LIB_SODIUM}
+    )
+    target_compile_options(${POMELO_TEST_API_DESTROY_INFLIGHT_WORKER} PRIVATE ${POMELO_COMPILE_FLAGS})
+
 
     # Test API: Broadcast
     set(SRC_TEST_API_BROADCAST
@@ -827,6 +850,7 @@ if (POMELO_BUILD_TESTS)
 
     add_test(NAME ${POMELO_TEST_API_BASIC} COMMAND ${POMELO_TEST_API_BASIC})
     add_test(NAME ${POMELO_TEST_API_DESTROY_INFLIGHT} COMMAND ${POMELO_TEST_API_DESTROY_INFLIGHT})
+    add_test(NAME ${POMELO_TEST_API_DESTROY_INFLIGHT_WORKER} COMMAND ${POMELO_TEST_API_DESTROY_INFLIGHT_WORKER})
     add_test(NAME ${POMELO_TEST_API_BROADCAST} COMMAND ${POMELO_TEST_API_BROADCAST})
 
     add_test(NAME ${POMELO_TEST_PLUGIN} COMMAND ${POMELO_TEST_PLUGIN})

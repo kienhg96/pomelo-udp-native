@@ -138,6 +138,19 @@ void pomelo_socket_cleanup(pomelo_socket_t * socket) {
     socket->flags = 0;
 
     if (socket->protocol_socket) {
+        // Abrupt teardown: the context is being destroyed without a graceful
+        // socket stop (e.g. pomelo_context_destroy called while sends are still
+        // in flight). Stop the protocol socket first so its in-flight senders
+        // are cancelled and the adapter stops receiving, then drain the crypto
+        // worker tasks so every sender is released through its own completion
+        // callback BEFORE the protocol context frees the sender pool. Without
+        // this, a threadpool thread could still be running sender_process_entry
+        // on a sender whose backing memory the loop thread has already freed
+        // (use-after-free; aborts at packet.c:629 / sender.c:218). On the
+        // graceful path this block is skipped: pomelo_socket_stop_deferred has
+        // already stopped, destroyed and NULLed protocol_socket.
+        pomelo_protocol_socket_stop(socket->protocol_socket);
+        pomelo_platform_drain_worker_tasks(socket->platform);
         pomelo_protocol_socket_destroy(socket->protocol_socket);
         socket->protocol_socket = NULL;
     }

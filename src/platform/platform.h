@@ -82,6 +82,17 @@ void pomelo_platform_cancel_worker_task(
 );
 
 
+/// @brief Synchronously drain all in-flight worker tasks.
+/// @details Cancels every pending worker task then pumps the platform loop
+/// until none remain, so each task's completion callback runs (which releases
+/// the object that owns the task) before the caller frees those objects. This
+/// closes the teardown use-after-free race where a threadpool thread is still
+/// executing a task entry while the loop thread frees the task's data.
+/// MUST be called from outside the platform loop (e.g. during a synchronous
+/// context teardown), never from within a loop callback (it runs the loop).
+void pomelo_platform_drain_worker_tasks(pomelo_platform_t * platform);
+
+
 /* -------------------------------------------------------------------------- */
 /*                             Platform UDP APIs                              */
 /* -------------------------------------------------------------------------- */

@@ -165,6 +165,35 @@ void pomelo_platform_uv_cancel_worker_task(
 }
 
 
+void pomelo_platform_uv_drain_worker_tasks(pomelo_platform_uv_t * platform) {
+    assert(platform != NULL);
+    pomelo_platform_uv_worker_mgr_t * manager = platform->worker_mgr;
+    if (!manager) return;
+
+    // Cancel every pending task. A task still queued on the threadpool is
+    // cancelled outright (its entry never runs); a task already running on a
+    // thread cannot be cancelled and will finish its entry normally. Either
+    // way its completion callback still fires, and the task stays alive until
+    // then, so its data (e.g. a protocol sender) is safe to touch meanwhile.
+    pomelo_platform_uv_task_worker_t * task = NULL;
+    pomelo_list_iterator_t it;
+    pomelo_list_iterator_init(&it, manager->tasks);
+    while (pomelo_list_iterator_next(&it, &task) == 0) {
+        pomelo_platform_uv_worker_task_cancel_ex(task);
+    }
+
+    // Pump the loop until every task's completion callback has run (each one
+    // removes itself from manager->tasks in pomelo_platform_uv_worker_release).
+    // This releases the task owners (senders) through their own completion path
+    // BEFORE the caller tears down the pools that back them, closing the
+    // teardown use-after-free race. Completions post via the loop's async, so
+    // UV_RUN_ONCE blocks only until the next one arrives and always progresses.
+    while (manager->tasks->size > 0) {
+        uv_run(manager->uv_loop, UV_RUN_ONCE);
+    }
+}
+
+
 /* -------------------------------------------------------------------------- */
 /*                               Private APIs                                 */
 /* -------------------------------------------------------------------------- */
