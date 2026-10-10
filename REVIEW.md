@@ -201,7 +201,7 @@ Truyền `NULL` cho `bin_len` → caller không biết số byte thực giải m
 
 ---
 
-## 6. Bug phát hiện từ binding Node (pomelo-udp-node)  ✅ (N1 + N2 + N3 đã vá)
+## 6. Bug phát hiện từ binding Node (pomelo-udp-node)  (N1 + N2 + N3 ✅ đã vá · N4 ☐ chưa vá)
 
 > Nguồn: test suite của `../pomelo-udp-node` (2026-10-08), submodule trỏ tới commit `f16bf3b` của repo này.
 > Cả 2 đều tái hiện được qua binding Node; **chưa** có test C tương ứng ở đây. Phần "nguyên nhân" của N2 là giả thuyết từ backtrace, cần agent xác nhận.
@@ -233,6 +233,14 @@ Truyền `NULL` cho `bin_len` → caller không biết số byte thực giải m
 - **Nguyên nhân:** libuv map `UV_UDP_REUSEADDR` thành `SO_REUSEPORT` (BSD/macOS) / `SO_REUSEADDR` (Linux, Windows). Trên Windows còn tệ hơn: `SO_REUSEADDR` cho phép bind đè cả socket không set cờ (port hijack). Cờ này không cần cho restart nhanh: UDP không có `TIME_WAIT` — đã kiểm chứng trên macOS: rebind ngay sau khi process cũ thoát / bị `kill -9` / sau `close()` trong cùng process đều OK; chỉ fail khi process cũ còn sống (đúng hành vi mong muốn). Linux/Windows: suy từ tài liệu, chưa chạy thực tế.
 - **✅ Đã vá:** bind server với flags `0`. Bind trùng → `EADDRINUSE` → `pomelo_platform_udp_bind` trả lỗi → `pomelo_socket_listen` thất bại. Nếu sau này cần nhiều process share 1 port (load-balance) thì thêm option riêng dùng `UV_UDP_REUSEPORT`, mặc định tắt.
 - **Regression test:** thêm `pomelo_test_platform_bind_in_use` vào `test/platform-test/platform-bind-fail-test.c`: bind `127.0.0.1:19998` → bind lần 2 phải fail → `udp_stop` → bind lại ngay phải OK → no leak. **Đỏ trước fix** (fail `platform-bind-fail-test.c:81`), **xanh sau fix**. Full CTest 21/21 PASS.
+
+**☐ CHƯA VÁ (Medium — robustness/DoS) — N4: `assert(packet != NULL)` khi cạn packet pool**
+`src/protocol/packet.c:629` (`pomelo_protocol_packet_header_init`)
+- **Triệu chứng:** `Assertion failed: (packet != NULL), function pomelo_protocol_packet_header_init, file packet.c, line 629` → SIGABRT (exit 134). Assert bật cả ở Release của node-gyp (không định nghĩa `NDEBUG`).
+- **Luồng (giả thuyết, cần xác nhận):** dưới tải gửi cực cao, packet pool cạn → một `pomelo_protocol_sender_t` được tạo/submit với `sender->packet == NULL` (acquire packet trả NULL không được chặn ở thượng nguồn) → `sender_process_entry` (chạy trên worker threadpool) gọi `pomelo_protocol_packet_header_init(&header, sender->packet=NULL)` → assert. Tức là path tạo/submit sender không kiểm tra NULL packet trước khi đẩy lên worker.
+- **Repro (qua binding Node):** 8 `worker_thread` **đồng thời**, mỗi worker server↔client loopback bơm **burst 20 message RELIABLE/ms mỗi chiều** (`socket.send` / `session.send` kênh 0) rồi bị `worker.terminate()`. Tái hiện SIGABRT `packet.c:629` sau vài chục iteration. Không tái hiện ở tải thấp / 1 worker.
+- **Hướng fix:** xử lý packet pool cạn một cách mềm — khi acquire packet trả NULL thì sender đánh dấu FAILED và đi `pomelo_pipeline_finish` (như nhánh lỗi submit worker đã có ở `sender.c:210-215`), **trước khi** submit lên worker; hoặc guard `sender_process_entry` khi `packet == NULL`. Không nên assert trên điều kiện do tải ngoài kiểm soát (đây là vector DoS: flood gửi làm cạn pool → abort). Viết test C: ép packet pool nhỏ + gửi vượt capacity → không abort, trả lỗi gửi.
+- **Nguồn:** phát hiện khi hunt T3 bên binding (2026-10-10). Submodule tại thời điểm này: `86cbc0a`.
 
 ---
 
